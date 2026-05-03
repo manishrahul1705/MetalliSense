@@ -1,0 +1,114 @@
+@import url("https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: 'Montserrat', system-ui, -apple-system, sans-serif;
+    background: linear-gradient(135deg, #f8fafb 0%, #f1f5f8 50%, #f0fdf6 100%);
+    color: #1a2129;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  * {
+    transition: color 200ms ease, background-color 200ms ease;
+  }
+}
+
+@layer components {
+  /* Primary Button - Metallic Green */
+  .btn-primary {
+    background: linear-gradient(135deg, #15c26b 0%, #0fa055 100%);
+    color: white;
+    font-weight: 600;
+    border-radius: 0.5rem;
+    box-shadow: 0 2px 8px rgba(15, 194, 107, 0.1);
+    transition: all 200ms ease;
+  }
+  
+  .btn-primary:hover {
+    box-shadow: 0 8px 24px rgba(15, 194, 107, 0.15);
+  }
+  
+  .btn-primary:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px white, 0 0 0 4px #15c26b;
+  }
+  
+  /* Secondary Button - Steel Grey */
+  .btn-secondary {
+    background: linear-gradient(135deg, #2d3742 0%, #1a2129 100%);
+    color: white;
+    font-weight: 600;
+    border-radius: 0.5rem;
+    transition: all 200ms ease;
+  }
+  
+  .btn-secondary:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  }
+  
+  .btn-secondary:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px white, 0 0 0 4px #4f5f73;
+  }
+  
+  /* Input Field - Premium Style */
+  .input-field {
+    width: 100%;
+    padding: 0.625rem 1rem;
+    border: 2px solid #e5eaef;
+    border-radius: 0.5rem;
+    background-color: white;
+    transition: all 200ms ease;
+  }
+  
+  .input-field::placeholder {
+    color: #9eafc0;
+  }
+  
+  .input-field:focus {
+    outline: none;
+    border-color: #15c26b;
+    box-shadow: 0 0 0 3px rgba(21, 194, 107, 0.1);
+  }
+  
+  /* Card - Elevated Design */
+  .card {
+    background-color: white;
+    border-radius: 0.75rem;
+    box-shadow: 0 2px 8px rgba(15, 194, 107, 0.1);
+    border: 1px solid #e5eaef;
+    transition: all 200ms ease;
+  }
+  
+  .card:hover {
+    box-shadow: 0 8px 24px rgba(15, 194, 107, 0.15);
+  }
+  
+  /* Gradient Text */
+  .text-gradient {
+    background: linear-gradient(135deg, #15c26b 0%, #0fa055 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  
+  /* Status Badge */
+  .status-online {
+    background-color: #15c26b;
+    color: white;
+    box-shadow: 0 4px 12px rgba(21, 194, 107, 0.3);
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+  
+  .status-offline {
+    background-color: #9eafc0;
+    color: white;
+  }
+}
