@@ -99,13 +99,19 @@ def predict(req: MechRequest):
         return predict_mechanical(grade, c.C, c.Si, c.Mn, c.P, c.S)
 
     elif req.mode == "ml":
+        is_steel = 'STEEL' in grade
+        ce_val = carbon_equivalent(c.C, c.Mn) if is_steel else round(c.C + (c.Si + c.P) / 3.0, 4)
+
         if not _ml_models or not _metadata:
-            raise HTTPException(503, "ML models not loaded. Use mode='formula'.")
+            # Fall back to formula mode seamlessly if ML models are not present
+            fallback = predict_mechanical(grade, c.C, c.Si, c.Mn, c.P, c.S)
+            fallback['mode'] = 'formula_fallback'
+            return fallback
 
         x = _build_features(grade, c)
         result = {
             'grade': grade,
-            'material_family': 'steel' if 'STEEL' in grade else 'cast_iron',
+            'material_family': 'steel' if is_steel else 'cast_iron',
         }
         for target in _metadata['targets_reg']:
             pred = float(_ml_models[target].predict(x)[0])
@@ -114,7 +120,7 @@ def predict(req: MechRequest):
         prob = _ml_models['classifier'].predict_proba(x)[0]
         result['pass_probability'] = round(float(prob[1]), 3)
         result['quality_result'] = 'PASS' if prob[1] > 0.5 else 'FAIL'
-        result['carbon_equivalent'] = round(carbon_equivalent(c.C, c.Mn), 4)
+        result['carbon_equivalent'] = round(ce_val, 4)
         return result
 
     else:
@@ -153,23 +159,37 @@ def ce_check(req: MechRequest):
     """
     c = req.composition
     grade = req.grade.upper()
-    CE = carbon_equivalent(c.C, c.Mn)
+    is_steel = 'STEEL' in grade
+
+    if is_steel:
+        CE = carbon_equivalent(c.C, c.Mn)
+        budget = [
+            {"element": "C", "value": c.C, "ce_contribution": round(c.C, 4),
+             "share_pct": round(c.C / CE * 100, 1) if CE > 0 else 0},
+            {"element": "Mn/6", "value": c.Mn, "ce_contribution": round(c.Mn / 6, 4),
+             "share_pct": round(c.Mn / 6 / CE * 100, 1) if CE > 0 else 0},
+        ]
+    else:
+        CE = c.C + (c.Si + c.P) / 3.0
+        budget = [
+            {"element": "C", "value": c.C, "ce_contribution": round(c.C, 4),
+             "share_pct": round(c.C / CE * 100, 1) if CE > 0 else 0},
+            {"element": "Si/3", "value": c.Si, "ce_contribution": round(c.Si / 3, 4),
+             "share_pct": round((c.Si / 3) / CE * 100, 1) if CE > 0 else 0},
+            {"element": "P/3", "value": c.P, "ce_contribution": round(c.P / 3, 4),
+             "share_pct": round((c.P / 3) / CE * 100, 1) if CE > 0 else 0},
+        ]
+
     std = MECH_STANDARDS.get(grade, {})
     ce_max = std.get('ce_max')
 
-    budget = [
-        {"element": "C", "value": c.C, "ce_contribution": round(c.C, 4),
-         "share_pct": round(c.C / CE * 100, 1) if CE > 0 else 0},
-        {"element": "Mn/6", "value": c.Mn, "ce_contribution": round(c.Mn / 6, 4),
-         "share_pct": round(c.Mn / 6 / CE * 100, 1) if CE > 0 else 0},
-    ]
-
     return {
         "carbon_equivalent": round(CE, 4),
+        "material_family": "steel" if is_steel else "cast_iron",
         "ce_limit": ce_max,
         "ce_margin": round(ce_max - CE, 4) if ce_max else None,
         "status": "PASS" if (ce_max is None or CE <= ce_max) else "FAIL",
-        "weldability": "OK" if CE <= 0.40 else "REDUCED" if CE <= 0.45 else "POOR",
+        "weldability": ("OK" if CE <= 0.40 else "REDUCED" if CE <= 0.45 else "POOR") if is_steel else "NOT_APPLICABLE",
         "budget": budget,
     }
 

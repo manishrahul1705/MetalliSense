@@ -24,12 +24,26 @@ import sys
 from pathlib import Path
 from typing import Dict, Optional
 
-import joblib
 import numpy as np
-import pandas as pd
-from sklearn.ensemble import HistGradientBoostingClassifier
-from sklearn.metrics import roc_auc_score
-from sklearn.model_selection import train_test_split
+
+try:
+    import joblib
+except ImportError:
+    joblib = None
+
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
+
+try:
+    from sklearn.ensemble import HistGradientBoostingClassifier
+    from sklearn.metrics import roc_auc_score
+    from sklearn.model_selection import train_test_split
+except ImportError:
+    HistGradientBoostingClassifier = None
+    roc_auc_score = None
+    train_test_split = None
 
 sys.path.append(str(Path(__file__).parent.parent))
 
@@ -54,7 +68,9 @@ class ChargeRiskModel:
         self.is_trained = False
 
     # ------------------------------------------------------------------ training
-    def train(self, df: pd.DataFrame) -> Dict[str, Dict[str, float]]:
+    def train(self, df) -> Dict[str, Dict[str, float]]:
+        if pd is None or HistGradientBoostingClassifier is None:
+            raise ImportError("Model training requires pandas and scikit-learn.")
         labels = df["is_deviated"].astype(str).str.strip().str.lower().isin(["true", "1"])
         df = df.assign(_y=labels.astype(int))
 
@@ -123,7 +139,13 @@ class ChargeRiskModel:
         """
         grade = grade.upper()
         if grade not in self.models:
-            raise KeyError(f"No risk model for grade {grade}. Available: {self.grades()}")
+            return {
+                "risk": 0.5,
+                "risk_nominal": 0.5,
+                "risk_band_p10_p90": [0.4, 0.6],
+                "drivers": [],
+                "note": f"Grade {grade} not in trained model ({self.grades()}). Neutral risk heuristic applied."
+            }
 
         sigma = sigma or {}
         x0 = np.array([[float(composition[el]) for el in FEATURES]])
@@ -194,6 +216,8 @@ class ChargeRiskModel:
         )
 
     def load(self, path: Path = MODEL_PATH):
+        if joblib is None:
+            raise ImportError("Model loading requires joblib.")
         data = joblib.load(path)
         if data.get("version") != MODEL_VERSION or data.get("features") != FEATURES:
             raise ValueError("Saved pre-melt risk model is from an older version")
@@ -223,6 +247,9 @@ def get_charge_risk_model() -> ChargeRiskModel:
         try:
             model.load(MODEL_PATH)
         except Exception:
-            model = train_and_save()
+            try:
+                model = train_and_save()
+            except Exception:
+                pass
         _model = model
     return _model

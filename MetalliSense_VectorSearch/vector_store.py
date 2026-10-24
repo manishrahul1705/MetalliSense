@@ -3,13 +3,13 @@ Vector store adapter for the PEC Hacks 4.0 x Actian VectorAI DB integration.
 
 This talks to a REAL, locally-running Actian VectorAI DB instance when the
 `actian_vectorai` SDK is installed and its server is reachable (this is the
-actual hackathon integration point — get the Community Edition from
+actual hackathon integration point -- get the Community Edition from
 https://www.actian.com/databases/vectorai-db/ and run it locally).
 
 If it isn't installed/running, this automatically falls back to a small
 in-memory numpy cosine-similarity store with the EXACT SAME interface, so
 the rest of the app (and your demo) never breaks. Swapping in the real
-VectorAI DB is then just: pip install the SDK + start it locally — no code
+VectorAI DB is then just: pip install the SDK + start it locally -- no code
 changes needed anywhere else in this project.
 """
 import os
@@ -29,13 +29,13 @@ try:
         # that the SDK imported.
         _client.collections.list()
         _use_real_vectorai = True
-        print(f"✓ Connected to real Actian VectorAI DB at {VECTORAI_HOST}")
+        print(f"[OK] Connected to real Actian VectorAI DB at {VECTORAI_HOST}")
     except Exception as e:
-        print(f"⚠️  actian_vectorai SDK installed but server unreachable at {VECTORAI_HOST} ({e})")
+        print(f"[WARN]  actian_vectorai SDK installed but server unreachable at {VECTORAI_HOST} ({e})")
         print("   Falling back to local in-memory vector store.")
         _client = None
 except ImportError:
-    print("ℹ️  actian_vectorai SDK not installed — using local in-memory vector store.")
+    print("[INFO]  actian_vectorai SDK not installed -- using local in-memory vector store.")
     print("   To use the real Actian VectorAI DB: pip install the SDK from")
     print("   https://www.actian.com/databases/vectorai-db/ and set VECTORAI_HOST.")
 
