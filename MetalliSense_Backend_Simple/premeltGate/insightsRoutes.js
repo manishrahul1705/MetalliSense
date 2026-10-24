@@ -5,6 +5,7 @@ const express = require('express');
 const store = require('./store');
 const scorecard = require('./supplierScorecard');
 const energy = require('./energy');
+const { requireAuth, requireRole } = require('./authMiddleware');
 
 const router = express.Router();
 const ok = (res, data) => res.json({ status: 'success', data });
@@ -24,10 +25,10 @@ router.get('/suppliers/lot-grade/:lotId', wrap((req) => {
   return { lotId: lot.lotId, supplier: lot.supplier, ...(scorecard.gradeForLot(lot) || { grade: 'NEW', inspectPieces: 25 }) };
 }));
 router.get('/suppliers/best', wrap((req) => scorecard.bestSupplierFor(req.query.materialType, req.query.alloyName)));
-router.patch('/suppliers/weights', wrap((req) => scorecard.updateWeights(req.body || {})));
+router.patch('/suppliers/weights', requireAuth, requireRole('METALLURGIST', 'QUALITY_MANAGER', 'ADMIN'), wrap((req) => scorecard.updateWeights(req.body || {})));
 // AHP pairwise judgements between Quality, Cost, Delivery and Service → pillar weights.
 router.get('/suppliers/ahp', wrap(() => scorecard.getAhp()));
-router.patch('/suppliers/ahp', wrap((req) => scorecard.updateAhp(req.body || {})));
+router.patch('/suppliers/ahp', requireAuth, requireRole('METALLURGIST', 'QUALITY_MANAGER', 'ADMIN'), wrap((req) => scorecard.updateAhp(req.body || {})));
 // Order split: how to divide the next purchase between suppliers.
 router.get('/suppliers/order-plan', wrap((req) => scorecard.orderPlan(req.query.materialType, req.query.tonnes)));
 // Supplier alerts only (grade drops, declining trend, hidden cost, blocked suppliers).
@@ -35,7 +36,7 @@ router.get('/suppliers/alerts', wrap((req) => scorecard.computeScorecard({ mater
 
 // ---------------------------------------------------------------- energy
 router.get('/energy/config', wrap(() => energy.getConfig()));
-router.patch('/energy/config', wrap((req) => energy.updateConfig(req.body || {})));
+router.patch('/energy/config', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'QUALITY_MANAGER', 'ADMIN'), wrap((req) => energy.updateConfig(req.body || {})));
 router.get('/energy/summary', wrap(() => energy.summary()));
 router.get('/energy/heat/:heatId', wrap((req) => {
   const heat = store.heats.get(req.params.heatId);
@@ -43,7 +44,7 @@ router.get('/energy/heat/:heatId', wrap((req) => {
   const { tapTempC, holdingMin, hour } = req.query;
   return energy.predictHeat(heat, { tapTempC, holdingMin, hour });
 }));
-router.post('/energy/heat/:heatId/actual', wrap((req) => energy.recordActual(req.params.heatId, req.body || {})));
-router.post('/energy/heat/:heatId/simulate', wrap((req) => energy.simulateActual(req.params.heatId, req.body?.by)));
+router.post('/energy/heat/:heatId/actual', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'ADMIN'), wrap((req) => energy.recordActual(req.params.heatId, req.body || {})));
+router.post('/energy/heat/:heatId/simulate', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'ADMIN'), wrap((req) => energy.simulateActual(req.params.heatId, req.body?.by)));
 
 module.exports = router;

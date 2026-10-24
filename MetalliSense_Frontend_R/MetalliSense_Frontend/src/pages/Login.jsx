@@ -33,15 +33,9 @@ export default function Login() {
     }
   };
 
-  const handleQuickLogin = (u, p) => {
+  const handleQuickFill = (u) => {
     setUsername(u);
-    setPassword(p);
     setError("");
-    setIsLoading(true);
-    login(u, p)
-      .then(() => navigate("/dashboard"))
-      .catch((err) => setError(err.response?.data?.message || "Login failed"))
-      .finally(() => setIsLoading(false));
   };
 
   return (
@@ -131,56 +125,58 @@ export default function Login() {
             </Button>
           </form>
 
-          {/* Quick Login Bar for Development / Verification */}
-          <div className="mt-6 pt-4 border-t border-gray-100">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 text-center">
-              Quick Role Sign-In (Verified Accounts)
-            </p>
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => handleQuickLogin("operator1", "OperatorPass123!")}
-                className="px-2 py-1 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition font-medium text-center"
-              >
-                Operator
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin("metallurgist1", "MetallurgyPass123!")}
-                className="px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded transition font-medium text-center"
-              >
-                Metallurgist
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin("qm1", "QualityPass123!")}
-                className="px-2 py-1 text-xs bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded transition font-medium text-center"
-              >
-                Quality Mgr
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin("inventory1", "InventoryPass123!")}
-                className="px-2 py-1 text-xs bg-amber-100 hover:bg-amber-200 text-amber-700 rounded transition font-medium text-center"
-              >
-                Stores
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin("finance1", "FinancePass123!")}
-                className="px-2 py-1 text-xs bg-purple-100 hover:bg-purple-200 text-purple-700 rounded transition font-medium text-center"
-              >
-                Finance
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin("admin1", "AdminSecurePass123!")}
-                className="px-2 py-1 text-xs bg-rose-100 hover:bg-rose-200 text-rose-700 rounded transition font-medium text-center"
-              >
-                Admin
-              </button>
+          {/* Quick Role Fill (Development / Verification only - no passwords) */}
+          {import.meta.env.DEV && (
+            <div className="mt-6 pt-4 border-t border-gray-100">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 text-center">
+                Development Role Quick-Fill
+              </p>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleQuickFill("operator1")}
+                  className="px-2 py-1 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition font-medium text-center"
+                >
+                  Operator
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickFill("metallurgist1")}
+                  className="px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded transition font-medium text-center"
+                >
+                  Metallurgist
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickFill("qm1")}
+                  className="px-2 py-1 text-xs bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded transition font-medium text-center"
+                >
+                  Quality Mgr
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickFill("inventory1")}
+                  className="px-2 py-1 text-xs bg-amber-100 hover:bg-amber-200 text-amber-700 rounded transition font-medium text-center"
+                >
+                  Stores
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickFill("finance1")}
+                  className="px-2 py-1 text-xs bg-purple-100 hover:bg-purple-200 text-purple-700 rounded transition font-medium text-center"
+                >
+                  Finance
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickFill("admin1")}
+                  className="px-2 py-1 text-xs bg-rose-100 hover:bg-rose-200 text-rose-700 rounded transition font-medium text-center"
+                >
+                  Admin
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

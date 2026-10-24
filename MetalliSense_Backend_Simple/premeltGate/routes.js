@@ -303,6 +303,15 @@ router.post('/heats/:heatId/evidence', requireAuth, wrap((req) => {
   const heat = store.heats.get(heatId);
   if (!heat) throw bad(404, `Heat ${heatId} not found`);
 
+  // Immutability interlock: completed or released heats cannot accept subsequent evidence
+  if (heat.status === 'COMPLETED' || heat.status === 'RELEASED') {
+    throw bad(409, `Cannot ingest evidence for heat in '${heat.status}' status. Physical evidence is immutable once completed or released.`, {
+      code: 'HEAT_ALREADY_COMPLETED',
+      heatId: heat.heat_id || heatId,
+      heatStatus: heat.status
+    });
+  }
+
   const b = req.body || {};
   const values = b.values || b.readings;
   const { evidenceType, sampleId, sourceInstrument, units = '%', specVersion = '1.0' } = b;

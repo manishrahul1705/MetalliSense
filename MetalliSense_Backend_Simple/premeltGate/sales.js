@@ -197,7 +197,7 @@ function completeHeat(heatId, body = {}, currentUser = null) {
 
   const currentSettings = loadSettings();
   const chargeKg = (heat.charge || []).reduce((s, l) => s + Number(l.kg), 0);
-  const metalKg = Number(heat.gate?.prediction?.metalKg) || chargeKg * 0.95;
+  const metalKg = Number(heat.gate?.prediction?.metalKg) || (chargeKg > 0 ? chargeKg * 0.95 : Number(heat.targetKg || 1000) * 0.95);
   const castingsKg = round(metalKg * (currentSettings.castingYieldPct / 100), 0);
   const returnsKg = round(metalKg * (currentSettings.returnsPct / 100), 0);
 
@@ -237,8 +237,8 @@ function completeHeat(heatId, body = {}, currentUser = null) {
     } catch (_) {}
   }
 
-  // Execute explicit state transition with optimistic concurrency
-  const updatedHeat = transitionHeat(heatId, HEAT_STATES.COMPLETED, {
+  // Execute explicit state transition with optimistic concurrency to COMPLETED
+  transitionHeat(heatId, HEAT_STATES.COMPLETED, {
     expectedVersion: body.version !== undefined ? body.version : body.expectedVersion,
     actor: engineerName,
     note: `Tap approved by ${engineerName} (${tapRecord.result})`,
@@ -246,6 +246,12 @@ function completeHeat(heatId, body = {}, currentUser = null) {
       final_chemistry_json: JSON.stringify(composition),
       tap_json: JSON.stringify(tapRecord)
     }
+  });
+
+  // Promote to RELEASED upon Quality Manager approval and verified disposition
+  const updatedHeat = transitionHeat(heatId, HEAT_STATES.RELEASED, {
+    actor: engineerName,
+    note: `Heat released by Quality Manager ${engineerName} for commercial dispatch`
   });
 
   // Record durable maker-checker review
@@ -272,8 +278,8 @@ function certificate(heatId) {
   const heat = store.heats.get(heatId);
   if (!heat) throw err(404, `Heat ${heatId} not found`);
 
-  // Interlock: Certificate requires COMPLETED or RELEASED heat with approved tap
-  if (!heat.tap || (heat.status !== HEAT_STATES.COMPLETED && heat.status !== HEAT_STATES.RELEASED)) {
+  // Interlock: Certificate strictly requires RELEASED heat with approved tap
+  if (!heat.tap || heat.status !== HEAT_STATES.RELEASED) {
     throw err(409, `Heat ${heatId} has no approved tap or is in state '${heat.status}'. Complete and release the heat first.`, {
       code: 'CERTIFICATE_INELIGIBLE'
     });
@@ -382,7 +388,12 @@ function listCompleted() {
 function createInvoice(body = {}, currentUser = null) {
   const heat = store.heats.get(body.heatId);
   if (!heat) throw err(404, `Heat ${body.heatId} not found`);
-  if (!heat.tap) throw err(409, `Heat ${heat.heatId} is not finished — approve the tap first`);
+  if (!heat.tap || heat.status !== HEAT_STATES.RELEASED) {
+    throw err(409, `Heat ${heat.heatId} is in state '${heat.status}'. Only heats in 'RELEASED' state can be invoiced. Complete and release the heat first.`, {
+      code: 'HEAT_NOT_RELEASED',
+      currentStatus: heat.status
+    });
+  }
 
   const db = getDb();
   const existingInv = db.prepare('SELECT * FROM invoices WHERE heat_id = ? AND status != ?').get(heat.heatId, 'CANCELLED');

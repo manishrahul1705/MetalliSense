@@ -18,10 +18,33 @@ const sellingPriceStore = require('./sellingPriceStore');
 const mechanicalRoutes = require('./mechanicalRoutes');
 
 const app = express();
-const { authenticate, csrfProtection } = require('./premeltGate/authMiddleware');
+const { authenticate, csrfProtection, requireAuth, requireRole } = require('./premeltGate/authMiddleware');
 const authRoutes = require('./premeltGate/authRoutes');
 
-app.use(cors({ origin: true, credentials: true }));
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+const defaultAllowedOrigins = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:4179',
+  'http://127.0.0.1:4179',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173'
+];
+
+const corsOriginWhitelist = allowedOrigins.length > 0 ? allowedOrigins : defaultAllowedOrigins;
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (corsOriginWhitelist.includes(origin)) return callback(null, true);
+    return callback(new Error('CORS policy: Origin ' + origin + ' is not allowed'), false);
+  },
+  credentials: true
+}));
 app.use(express.json({ limit: '1mb' }));
 app.use(authenticate);
 app.use(csrfProtection);
@@ -60,7 +83,7 @@ app.get('/api/v2/alerts/email-status', (req, res) => {
   });
 });
 
-app.post('/api/v2/alerts/send-email', async (req, res) => {
+app.post('/api/v2/alerts/send-email', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'QUALITY_MANAGER', 'ADMIN'), async (req, res) => {
   const { grade, severity, composition, recommendedAdditions, batchId, costDetails } = req.body;
   if (!grade || !severity || !composition) {
     return res.status(400).json({ status: 'fail', message: 'grade, severity, and composition are required' });
@@ -198,7 +221,7 @@ trainingData.get('/', (req, res) => {
   res.json({ status: 'success', results: data.length, data: { data } });
 });
 
-trainingData.post('/', (req, res) => {
+trainingData.post('/', requireAuth, requireRole('METALLURGIST', 'ADMIN'), (req, res) => {
   res.status(201).json({ status: 'success', data: { data: store.create(req.body) } });
 });
 
@@ -208,13 +231,13 @@ trainingData.get('/:id', (req, res) => {
   res.json({ status: 'success', data: { data: doc } });
 });
 
-trainingData.patch('/:id', (req, res) => {
+trainingData.patch('/:id', requireAuth, requireRole('METALLURGIST', 'ADMIN'), (req, res) => {
   const doc = store.updateById(req.params.id, req.body);
   if (!doc) return res.status(404).json({ status: 'fail', message: 'No document found with that ID' });
   res.json({ status: 'success', data: { data: doc } });
 });
 
-trainingData.delete('/:id', (req, res) => {
+trainingData.delete('/:id', requireAuth, requireRole('METALLURGIST', 'ADMIN'), (req, res) => {
   const ok = store.deleteById(req.params.id);
   if (!ok) return res.status(404).json({ status: 'fail', message: 'No document found with that ID' });
   res.status(204).json({ status: 'success', data: null });
@@ -230,7 +253,7 @@ grades.get('/', (req, res) => {
   res.json({ status: 'success', results: specs.length, data: { data: specs } });
 });
 
-grades.post('/', (req, res) => {
+grades.post('/', requireAuth, requireRole('METALLURGIST', 'ADMIN'), (req, res) => {
   if (!req.body.grade) return res.status(400).json({ status: 'fail', message: 'grade is required' });
   res.status(201).json({ status: 'success', data: { data: gradeStore.create(req.body) } });
 });
@@ -247,13 +270,13 @@ grades.get('/:gradeName', (req, res) => {
   res.json({ status: 'success', data: { grade: spec } });
 });
 
-grades.patch('/:id', (req, res) => {
+grades.patch('/:id', requireAuth, requireRole('METALLURGIST', 'ADMIN'), (req, res) => {
   const spec = gradeStore.update(req.params.id, req.body);
   if (!spec) return res.status(404).json({ status: 'fail', message: 'No document found with that ID' });
   res.json({ status: 'success', data: { data: spec } });
 });
 
-grades.delete('/:id', (req, res) => {
+grades.delete('/:id', requireAuth, requireRole('METALLURGIST', 'ADMIN'), (req, res) => {
   const ok = gradeStore.remove(req.params.id);
   if (!ok) return res.status(404).json({ status: 'fail', message: 'No document found with that ID' });
   res.status(204).json({ status: 'success', data: null });
@@ -875,7 +898,7 @@ costRouter.get('/prices', (req, res) => {
   });
 });
 
-costRouter.patch('/prices', (req, res) => {
+costRouter.patch('/prices', requireAuth, requireRole('SALES_FINANCE', 'ADMIN'), (req, res) => {
   const { elementPrices, baseMetalPrices } = req.body;
   if (!elementPrices && !baseMetalPrices) {
     return res.status(400).json({ status: 'fail', message: 'Provide elementPrices and/or baseMetalPrices to update' });
@@ -932,7 +955,7 @@ carbonRouter.get('/factors', (req, res) => {
   });
 });
 
-carbonRouter.patch('/factors', (req, res) => {
+carbonRouter.patch('/factors', requireAuth, requireRole('METALLURGIST', 'ADMIN'), (req, res) => {
   const { elementCarbon, baseMetalCarbon } = req.body;
   if (!elementCarbon && !baseMetalCarbon) {
     return res.status(400).json({ status: 'fail', message: 'Provide elementCarbon and/or baseMetalCarbon to update' });
@@ -1241,7 +1264,7 @@ app.get('/api/v2/cost/selling-prices', (req, res) => {
   res.json({ status: 'success', data: sellingPriceStore.getSellingPrices() });
 });
 
-app.patch('/api/v2/cost/selling-prices', (req, res) => {
+app.patch('/api/v2/cost/selling-prices', requireAuth, requireRole('SALES_FINANCE', 'ADMIN'), (req, res) => {
   if (!req.body || Object.keys(req.body).length === 0) {
     return res.status(400).json({ status: 'fail', message: 'Provide { "GRADE": pricePerTon, ... } to update' });
   }
