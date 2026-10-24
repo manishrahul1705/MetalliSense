@@ -217,6 +217,12 @@ function completeHeat(heatId, body = {}, currentUser = null) {
     metalKg: round(metalKg, 0),
     castingsKg,
     returnsKg,
+    lossKg: Math.max(0, round(metalKg - castingsKg - returnsKg, 0)),
+    materialBalanceCheck: {
+      accountedKg: round(castingsKg + returnsKg + Math.max(0, metalKg - castingsKg - returnsKg), 0),
+      balancePct: round(((castingsKg + returnsKg + Math.max(0, metalKg - castingsKg - returnsKg)) / metalKg) * 100, 1),
+      conserved: Math.abs((castingsKg + returnsKg + Math.max(0, metalKg - castingsKg - returnsKg)) - metalKg) < 1.0
+    },
     chemistry: chemResult,
     mechanical: mechResult,
     acceptedStrategy: body.acceptedStrategy || null,

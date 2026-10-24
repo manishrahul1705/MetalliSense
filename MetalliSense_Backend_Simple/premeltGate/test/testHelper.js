@@ -43,8 +43,10 @@ function createMeltingHeat(heatId = 'H-TEST-MELTING', targetKg = 1000) {
   const db = getDb();
   const existing = db.prepare('SELECT * FROM heats WHERE heat_id = ?').get(heatId);
   if (existing) {
-    db.prepare('DELETE FROM heats WHERE heat_id = ?').run(heatId);
-    db.prepare('DELETE FROM heat_transitions WHERE heat_id = ?').run(heatId);
+    try { db.prepare('DELETE FROM heat_transitions WHERE heat_id = ?').run(heatId); } catch (_) {}
+    try { db.prepare('DELETE FROM evidence WHERE heat_id = ?').run(heatId); } catch (_) {}
+    try { db.prepare('DELETE FROM samples WHERE heat_id = ?').run(heatId); } catch (_) {}
+    try { db.prepare('DELETE FROM heats WHERE heat_id = ?').run(heatId); } catch (_) {}
   }
   const nowIso = new Date().toISOString();
   db.prepare(`

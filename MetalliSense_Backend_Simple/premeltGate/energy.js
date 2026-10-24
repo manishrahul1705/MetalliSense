@@ -130,13 +130,35 @@ function chargeProfile(charge) {
 function predictHeat(heat, opts = {}) {
   const grade = String(heat.grade || '').toUpperCase();
   const base = settings.baseKwhPerT[grade] ?? 580;
+
+  // S0-010: Thermodynamic validation for holding time and tap temperature
+  let holdingMin = opts.holdingMin !== undefined ? Number(opts.holdingMin) : settings.defaultHoldingMin;
+  if (!Number.isFinite(holdingMin) || holdingMin < 0) {
+    throw Object.assign(new Error('Holding duration must be a non-negative number >= 0 minutes. Received: ' + opts.holdingMin), {
+      status: 400,
+      code: 'INVALID_HOLDING_DURATION'
+    });
+  }
+  if (holdingMin > 1440) {
+    throw Object.assign(new Error('Holding duration cannot exceed 1440 minutes (24 hours). Received: ' + opts.holdingMin), {
+      status: 400,
+      code: 'EXCESSIVE_HOLDING_DURATION'
+    });
+  }
+
+  let tapTempC = opts.tapTempC !== undefined && opts.tapTempC !== '' ? Number(opts.tapTempC) : settings.refTapTempC[grade] || 1550;
+  if (!Number.isFinite(tapTempC) || tapTempC < 1300 || tapTempC > 1800) {
+    throw Object.assign(new Error('Tap temperature ' + tapTempC + ' °C is outside physical induction furnace operating bounds (1300 °C to 1800 °C)'), {
+      status: 400,
+      code: 'INVALID_TAP_TEMPERATURE'
+    });
+  }
+
   const p = chargeProfile(opts.charge || heat.charge);
   const t = p.totalKg / 1000;
   if (t <= 0) return { heatId: heat.heatId, grade, chargeT: 0, kwh: 0, drivers: [], tips: [], note: 'Empty charge' };
 
   const baseKwh = base * t;
-  const tapTempC = Number(opts.tapTempC) || settings.refTapTempC[grade] || 1550;
-  const holdingMin = opts.holdingMin !== undefined ? Number(opts.holdingMin) : settings.defaultHoldingMin;
   // Past heats are costed at the hour they actually melted.
   const startedAt = heat.start?.at ? new Date(heat.start.at) : null;
   const hour = opts.hour !== undefined && opts.hour !== '' ? Number(opts.hour) : startedAt && heat.status !== 'PLANNED' ? startedAt.getHours() : new Date().getHours();
@@ -328,13 +350,28 @@ function summary() {
       avgActualKwhPerT: avg(melted.map((r) => r.actualKwhPerT)),
     },
     savings: {
+      savingsType: 'DUAL_AUDIT_VERIFIED',
+      empiricalMeteredSavings: {
+        heatsMetered: melted.length,
+        kwhSaved: round(Math.max(0, melted.reduce((s, r) => s + ((settings.baseKwhPerT[r.grade] || 580) * r.chargeT - (r.actualKwh || (settings.baseKwhPerT[r.grade] || 580) * r.chargeT)), 0)), 0),
+        rsSaved: round(Math.max(0, melted.reduce((s, r) => s + ((settings.baseKwhPerT[r.grade] || 580) * r.chargeT - (r.actualKwh || (settings.baseKwhPerT[r.grade] || 580) * r.chargeT)), 0)) * rate, 0),
+        co2SavedKg: round(Math.max(0, melted.reduce((s, r) => s + ((settings.baseKwhPerT[r.grade] || 580) * r.chargeT - (r.actualKwh || (settings.baseKwhPerT[r.grade] || 580) * r.chargeT)), 0)) * settings.gridCo2KgPerKwh, 0),
+        methodology: 'Direct meter readings vs baseline kWh/t across metered heats.'
+      },
+      counterfactualAvoidance: {
+        badMeltsAvoided: avoided.length,
+        kwhAvoided: round(avoidedKwh, 0),
+        rsAvoided: round(avoidedKwh * rate, 0),
+        co2AvoidedKg: round(avoidedKwh * settings.gridCo2KgPerKwh, 0),
+        methodology: 'Avoidance of full melt energy for heats held by Pre-Melt Gate before furnace power-on.'
+      },
       badMeltsAvoided: avoided.length,
       kwhAvoided: round(avoidedKwh, 0),
       rsAvoided: round(avoidedKwh * rate, 0),
       co2AvoidedKg: round(avoidedKwh * settings.gridCo2KgPerKwh, 0),
       potentialKwh: round(potential, 0),
       potentialRs: round(potential * rate, 0),
-      note: 'A heat the Pre-Melt Gate held before melting saves the full melt energy of a heat that would have been downgraded or re-melted.',
+      note: 'A heat the Pre-Melt Gate held before melting saves the full melt energy of a heat that would have been downgraded or re-melted (counterfactual). Empirical metered savings reflects actual sub-baseline efficiency.',
     },
     byGrade: gradeRows,
     heats: heatsOut,

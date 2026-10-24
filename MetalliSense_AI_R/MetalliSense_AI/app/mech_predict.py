@@ -397,12 +397,20 @@ def predict_mechanical(grade: str, C: float, Si: float, Mn: float,
 
     pass_fail, alerts = quality_checks(grade, C, Si, Mn, P, S, uts, ys, elong, hb, CE)
 
-    # CE budget breakdown (steel CE formula)
-    ce_steel = carbon_equivalent(C, Mn)
-    ce_budget = {
-        'C': {'value': C, 'contribution': round(C, 4), 'share_pct': round(C / ce_steel * 100, 1) if ce_steel > 0 else 0},
-        'Mn': {'value': Mn, 'contribution': round(Mn / 6, 4), 'share_pct': round((Mn / 6) / ce_steel * 100, 1) if ce_steel > 0 else 0},
-    }
+    # CE budget breakdown based on material family
+    if is_steel:
+        ce_val = carbon_equivalent(C, Mn)
+        ce_budget = {
+            'C': {'value': C, 'contribution': round(C, 4), 'share_pct': round(C / ce_val * 100, 1) if ce_val > 0 else 0},
+            'Mn/6': {'value': Mn, 'contribution': round(Mn / 6.0, 4), 'share_pct': round((Mn / 6.0) / ce_val * 100, 1) if ce_val > 0 else 0},
+        }
+    else:
+        ce_val = C + (Si + P) / 3.0
+        ce_budget = {
+            'C': {'value': C, 'contribution': round(C, 4), 'share_pct': round(C / ce_val * 100, 1) if ce_val > 0 else 0},
+            'Si/3': {'value': Si, 'contribution': round(Si / 3.0, 4), 'share_pct': round((Si / 3.0) / ce_val * 100, 1) if ce_val > 0 else 0},
+            'P/3': {'value': P, 'contribution': round(P / 3.0, 4), 'share_pct': round((P / 3.0) / ce_val * 100, 1) if ce_val > 0 else 0},
+        }
 
     # Element contributions to UTS (approximate, for explainability)
     if is_steel:
