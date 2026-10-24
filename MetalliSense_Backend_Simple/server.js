@@ -18,8 +18,19 @@ const sellingPriceStore = require('./sellingPriceStore');
 const mechanicalRoutes = require('./mechanicalRoutes');
 
 const app = express();
-app.use(cors()); // open — no auth, no credentials needed
+const { authenticate, csrfProtection } = require('./premeltGate/authMiddleware');
+const authRoutes = require('./premeltGate/authRoutes');
+
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
+app.use(authenticate);
+app.use(csrfProtection);
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  next();
+});
+app.use('/api/v2/auth', authRoutes);
 
 const port = process.env.PORT || 3000;
 

@@ -71,6 +71,10 @@ export async function dispatch(method,url,body){
    st.log('STRATEGY_ACCEPTED',h.heatId,'operator',b.candidate.strategy+'; accepted candidate quantities deducted');await persist();return {status:200,data:{status:'success',data:h.acceptedStrategy}};
   } catch(e){st.restore(before);extra=oldExtra;return {status:409,data:{message:e.message}};}
  }
+ if(path==='/api/v2/auth/me'){const user=extra.currentUser||{id:'operator1',username:'operator1',email:'operator1@metallisense.local',role:'OPERATOR',fullName:'Furnace Operator 1',roles:['OPERATOR']};return {status:200,data:{status:'success',data:{user}}};}
+ if(path==='/api/v2/auth/login'){const uName=body?.username||'operator1';const r=uName.includes('qm')?'QUALITY_MANAGER':(uName.includes('admin')?'ADMIN':(uName.includes('metallurgist')?'METALLURGIST':(uName.includes('inventory')?'INVENTORY_MANAGER':'OPERATOR')));const user={id:uName,username:uName,email:uName+'@metallisense.local',role:r,fullName:'Demo '+r,roles:[r]};extra.currentUser=user;await persist();return {status:200,data:{status:'success',data:{user,message:'Logged in successfully'}}};}
+ if(path==='/api/v2/auth/logout'){extra.currentUser=null;await persist();return {status:200,data:{status:'success',data:{message:'Logged out successfully'}}};}
+ if(path==='/api/v2/auth/csrf'){return {status:200,data:{status:'success',data:{csrfToken:'mock-csrf-token'}}};}
  if(path==='/api/v2/sales/orders')return {status:200,data:{status:'success',data:extra.orders}};
  if(path==='/api/v2/alerts/send-email'){const message=outbox('Deviation '+body.severity,body.batchId||body.grade,JSON.stringify(body));await persist();return {status:200,data:{status:'success',data:{sent:false,queued:true,message}}};}
  if(path==='/__mock/state')return {status:200,data:{store:requirePort('premeltGate/store').snapshot(),extra}};

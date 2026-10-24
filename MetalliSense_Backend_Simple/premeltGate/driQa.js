@@ -71,12 +71,13 @@ function releaseDecision(values, calc) {
   return { status, reason, restriction: status === 'RESTRICTED' ? { maxSharePct: maxShare } : null };
 }
 
-function enter(lotId, body) {
+function enter(lotId, body, currentUser = null) {
   const lot = store.getLot(lotId);
   if (!lot) throw err(404, `Lot ${lotId} not found`);
   if (lot.materialType !== 'DRI') throw err(400, 'Lab entry is for sponge iron (DRI) lots');
   if (['CONSUMED', 'REJECTED'].includes(lot.status)) throw err(409, `Lot is ${lot.status}`);
-  if (!body.analyst) throw err(400, 'Analyst name is required');
+  const analystName = currentUser ? (currentUser.displayName || currentUser.username) : body.analyst;
+  if (!analystName) throw err(400, 'Analyst name is required');
 
   const values = {};
   FIELDS.forEach((f) => { if (body[f] !== undefined && body[f] !== '' && body[f] !== null) values[f] = Number(body[f]); });
@@ -94,7 +95,7 @@ function enter(lotId, body) {
     values,
     calculated: calculate(values),
     method: body.method || 'Ferric chloride',
-    analyst: body.analyst,
+    analyst: analystName,
     warningsConfirmed: warnings,
     correctionReason: previous.length ? body.correctionReason || 'Re-test' : null,
     status: 'PENDING_APPROVAL',
@@ -107,18 +108,27 @@ function enter(lotId, body) {
   return rec;
 }
 
-function approve(qaId, { approver }) {
+function approve(qaId, { approver } = {}, currentUser = null) {
   const rec = store.qa.get(qaId);
   if (!rec) throw err(404, `QA result ${qaId} not found`);
   if (rec.status !== 'PENDING_APPROVAL') throw err(409, `QA result is ${rec.status}`);
-  if (!approver) throw err(400, 'Approver name is required');
-  if (approver.trim().toLowerCase() === rec.analyst.trim().toLowerCase()) {
-    throw err(403, 'Maker–checker: the approver must be a different person from the analyst');
+  const approverName = currentUser ? (currentUser.displayName || currentUser.username) : approver;
+  if (!approverName) throw err(400, 'Approver name is required');
+  if (currentUser) {
+    const mc = require('./security').checkMakerCheckerSeparation({
+      entityType: 'DRI_QA_APPROVAL',
+      entityId: qaId,
+      checkerUserId: currentUser.userId
+    });
+    if (!mc.allowed) throw err(403, mc.reason, { code: mc.code });
+  }
+  if ((approverName || "").trim().toLowerCase() === (rec.analyst || "").trim().toLowerCase()) {
+    throw err(403, 'Maker–checker: the approver must be a different person from the analyst', { code: 'MAKER_CHECKER_VIOLATION' });
   }
   const lot = store.getLot(rec.lotId);
   store.qa.list(rec.lotId).filter((q) => q.status === 'APPROVED').forEach((q) => { q.status = 'SUPERSEDED'; });
   rec.status = 'APPROVED';
-  rec.approvedBy = approver;
+  rec.approvedBy = approverName;
   rec.approvedAt = new Date();
 
   lot.tested = { ...(lot.declared || {}), ...rec.values };
@@ -128,12 +138,25 @@ function approve(qaId, { approver }) {
   const g = require('./supplierScorecard').gradeForLot(lot);
   if (['RELEASED', 'RESTRICTED'].includes(d.status) && g?.grade === 'D') {
     // Grade-D supplier: a passing lab result still needs a manager's approval.
-    store.setStatus(lot, 'AWAITING_QA', `${d.reason} — but ${lot.supplier} is grade D (score ${g.score}): manager approval needed to release`, approver, { decidedBy: 'QA' });
+    store.setStatus(lot, 'AWAITING_QA', `${d.reason} — but ${lot.supplier} is grade D (score ${g.score}): manager approval needed to release`, approverName, { decidedBy: 'QA' });
     lot.flags = ['MANAGER_APPROVAL_REQUIRED'];
   } else {
-    store.setStatus(lot, d.status, d.reason, approver, { restriction: d.restriction, decidedBy: 'QA' });
+    store.setStatus(lot, d.status, d.reason, approverName, { restriction: d.restriction, decidedBy: 'QA' });
   }
-  store.log('DRI_QA_APPROVED', lot.lotId, approver, `${qaId} → ${lot.status}`);
+  store.log('DRI_QA_APPROVED', lot.lotId, approverName, `${qaId} → ${lot.status}`);
+  if (currentUser) {
+    try {
+      require('./security').recordMakerCheckerReview({
+        entityType: 'DRI_QA_APPROVAL',
+        entityId: qaId,
+        entityVersion: rec.version,
+        makerId: rec.analyst || 'LEGACY',
+        checkerId: currentUser.userId,
+        decision: 'APPROVED',
+        reason: d.reason
+      });
+    } catch (_) {}
+  }
   return { qa: rec, lot: store.view(lot) };
 }
 

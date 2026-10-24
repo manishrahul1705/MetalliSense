@@ -1,11 +1,11 @@
 import React, { useState } from "react";
 import { useAuth } from "../../context/AuthContext";
-import { useNavigate } from "react-router-dom";
-import { LogOut, User, ChevronDown } from "lucide-react";
+import { useNavigate, Link } from "react-router-dom";
+import { LogOut, User, ChevronDown, LogIn, Shield } from "lucide-react";
 import OPCStatusIndicator from "./OPCStatusIndicator";
 
 const TopBar = ({ title, actions }) => {
-  const { user, mongoUser, logout } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [showUserMenu, setShowUserMenu] = useState(false);
 
@@ -18,6 +18,8 @@ const TopBar = ({ title, actions }) => {
     }
   };
 
+  const primaryRole = user?.roles?.[0] || "OPERATOR";
+
   return (
     <div className="bg-white/80 backdrop-blur-sm border-b border-metal-200 px-6 py-4 shadow-sm">
       <div className="flex justify-between items-center">
@@ -29,24 +31,25 @@ const TopBar = ({ title, actions }) => {
           {actions}
           <OPCStatusIndicator />
 
-          {/* User Menu */}
-          {user && (
+          {/* User Menu or Sign In */}
+          {user ? (
             <div className="relative">
               <button
                 onClick={() => setShowUserMenu(!showUserMenu)}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors"
+                className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors border border-gray-200"
               >
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-white font-semibold">
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-600 to-teal-700 flex items-center justify-center text-white font-semibold text-sm shadow">
                   {user.displayName
                     ? user.displayName.charAt(0).toUpperCase()
-                    : user.email?.charAt(0).toUpperCase()}
+                    : user.username?.charAt(0).toUpperCase()}
                 </div>
                 <div className="text-left hidden md:block">
-                  <div className="text-sm font-medium text-gray-900">
-                    {user.displayName || "User"}
+                  <div className="text-sm font-semibold text-gray-900 leading-tight">
+                    {user.displayName || user.username}
                   </div>
-                  <div className="text-xs text-gray-500">
-                    {mongoUser?.metadata?.role || "Chemical Engineer 1"}
+                  <div className="text-xs font-medium text-emerald-700 flex items-center gap-1">
+                    <Shield className="w-3 h-3" />
+                    <span>{user.roles ? user.roles.join(', ') : primaryRole}</span>
                   </div>
                 </div>
                 <ChevronDown
@@ -65,12 +68,15 @@ const TopBar = ({ title, actions }) => {
                   />
                   <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-20">
                     <div className="px-4 py-3 border-b border-gray-100">
-                      <p className="text-sm font-medium text-gray-900">
-                        {user.displayName || "User"}
+                      <p className="text-sm font-semibold text-gray-900">
+                        {user.displayName || user.username}
                       </p>
                       <p className="text-xs text-gray-500 truncate">
-                        {user.email}
+                        {user.email || user.username}
                       </p>
+                      <span className="inline-block mt-1 px-2 py-0.5 text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 rounded font-medium">
+                        {primaryRole}
+                      </span>
                     </div>
 
                     <button
@@ -84,6 +90,14 @@ const TopBar = ({ title, actions }) => {
                 </>
               )}
             </div>
+          ) : (
+            <Link
+              to="/login"
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-sm"
+            >
+              <LogIn className="w-4 h-4" />
+              <span>Sign In</span>
+            </Link>
           )}
         </div>
       </div>

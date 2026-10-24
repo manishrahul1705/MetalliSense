@@ -1,33 +1,47 @@
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate, Link } from "react-router-dom";
-import { Mail, Lock, LogIn } from "lucide-react";
+import { Mail, Lock, LogIn, AlertCircle } from "lucide-react";
 import Button from "../components/common/Button";
 import Input from "../components/common/Input";
 
 export default function Login() {
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
+    setError("");
 
-    if (!email || !password) {
+    if (!username || !password) {
+      setError("Username and password are required");
       return;
     }
 
     setIsLoading(true);
     try {
-      await login(email, password);
+      await login(username, password);
       navigate("/dashboard");
-    } catch (error) {
-      console.error("Login failed:", error);
+    } catch (err) {
+      setError(err.response?.data?.message || "Invalid username or password");
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleQuickLogin = (u, p) => {
+    setUsername(u);
+    setPassword(p);
+    setError("");
+    setIsLoading(true);
+    login(u, p)
+      .then(() => navigate("/dashboard"))
+      .catch((err) => setError(err.response?.data?.message || "Login failed"))
+      .finally(() => setIsLoading(false));
   };
 
   return (
@@ -43,25 +57,32 @@ export default function Login() {
 
         {/* Login Form */}
         <div className="bg-white rounded-lg shadow-2xl p-8 border border-gray-200">
+          {error && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md flex items-center space-x-2 text-red-700 text-sm">
+              <AlertCircle className="h-5 w-5 flex-shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Email Input */}
+            {/* Username Input */}
             <div>
               <label
-                htmlFor="email"
+                htmlFor="username"
                 className="block text-sm font-medium text-gray-700 mb-2"
               >
-                Email Address
+                Username or Email
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                   <Mail className="h-5 w-5 text-gray-400" />
                 </div>
                 <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
+                  id="username"
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="e.g. operator1 or admin1"
                   className="pl-10"
                   required
                 />
@@ -92,16 +113,6 @@ export default function Login() {
               </div>
             </div>
 
-            {/* Forgot Password Link */}
-            <div className="flex items-center justify-end">
-              <Link
-                to="/forgot-password"
-                className="text-sm text-emerald-600 hover:text-emerald-700"
-              >
-                Forgot password?
-              </Link>
-            </div>
-
             {/* Login Button */}
             <Button
               type="submit"
@@ -120,17 +131,55 @@ export default function Login() {
             </Button>
           </form>
 
-          {/* Sign Up Link */}
-          <div className="mt-6 text-center">
-            <p className="text-sm text-gray-600">
-              Don't have an account?{" "}
-              <Link
-                to="/signup"
-                className="font-medium text-emerald-600 hover:text-emerald-700"
-              >
-                Sign up
-              </Link>
+          {/* Quick Login Bar for Development / Verification */}
+          <div className="mt-6 pt-4 border-t border-gray-100">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 text-center">
+              Quick Role Sign-In (Verified Accounts)
             </p>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => handleQuickLogin("operator1", "OperatorPass123!")}
+                className="px-2 py-1 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition font-medium text-center"
+              >
+                Operator
+              </button>
+              <button
+                type="button"
+                onClick={() => handleQuickLogin("metallurgist1", "MetallurgyPass123!")}
+                className="px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded transition font-medium text-center"
+              >
+                Metallurgist
+              </button>
+              <button
+                type="button"
+                onClick={() => handleQuickLogin("qm1", "QualityPass123!")}
+                className="px-2 py-1 text-xs bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded transition font-medium text-center"
+              >
+                Quality Mgr
+              </button>
+              <button
+                type="button"
+                onClick={() => handleQuickLogin("inventory1", "InventoryPass123!")}
+                className="px-2 py-1 text-xs bg-amber-100 hover:bg-amber-200 text-amber-700 rounded transition font-medium text-center"
+              >
+                Stores
+              </button>
+              <button
+                type="button"
+                onClick={() => handleQuickLogin("finance1", "FinancePass123!")}
+                className="px-2 py-1 text-xs bg-purple-100 hover:bg-purple-200 text-purple-700 rounded transition font-medium text-center"
+              >
+                Finance
+              </button>
+              <button
+                type="button"
+                onClick={() => handleQuickLogin("admin1", "AdminSecurePass123!")}
+                className="px-2 py-1 text-xs bg-rose-100 hover:bg-rose-200 text-rose-700 rounded transition font-medium text-center"
+              >
+                Admin
+              </button>
+            </div>
           </div>
         </div>
       </div>

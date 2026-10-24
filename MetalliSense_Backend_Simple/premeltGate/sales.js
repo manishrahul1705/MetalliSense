@@ -114,8 +114,9 @@ function inWords(num) {
 // ------------------------------------------------------------ complete the heat (Approve Tap)
 /**
  * body: { approvedBy, composition, mechanical, standard, acceptedStrategy, version, evidenceType }
+ * currentUser: authenticated user from session context (optional, enables server-owned attribution and maker-checker)
  */
-function completeHeat(heatId, body = {}) {
+function completeHeat(heatId, body = {}, currentUser = null) {
   const heat = store.heats.get(heatId);
   if (!heat) throw err(404, `Heat ${heatId} not found`);
 
@@ -137,10 +138,27 @@ function completeHeat(heatId, body = {}) {
     });
   }
 
-  if (!body.approvedBy || !String(body.approvedBy).trim()) {
+  // Server-owned actor attribution: prioritize authenticated identity over client-supplied string
+  let engineerName = currentUser ? (currentUser.displayName || currentUser.username) : null;
+  if (!engineerName && body.approvedBy && String(body.approvedBy).trim()) {
+    engineerName = String(body.approvedBy).trim();
+  }
+  if (!engineerName) {
     throw err(400, "The engineer's name is required to approve the tap");
   }
-  const engineerName = String(body.approvedBy).trim();
+
+  // Maker-checker separation: The person releasing the heat cannot be the same user who planned or started the heat
+  if (currentUser) {
+    const plannedBy = heat.plannedBy;
+    const startedBy = heat.start?.by;
+    const currentId = currentUser.userId || currentUser.username;
+    if ((plannedBy && (plannedBy === currentId || plannedBy === currentUser.username)) ||
+        (startedBy && (startedBy === currentId || startedBy === currentUser.username))) {
+      throw err(403, 'Maker-checker violation: The Quality Manager releasing the heat cannot be the same user who planned or started the heat.', {
+        code: 'MAKER_CHECKER_VIOLATION'
+      });
+    }
+  }
 
   // Chemistry evidence validation (S0-001)
   const composition = body.composition || heat.finalChemistry;
@@ -229,6 +247,22 @@ function completeHeat(heatId, body = {}) {
       tap_json: JSON.stringify(tapRecord)
     }
   });
+
+  // Record durable maker-checker review
+  if (currentUser) {
+    try {
+      const sec = require('./security');
+      sec.recordMakerCheckerReview({
+        entityType: 'HEAT_RELEASE',
+        entityId: heatId,
+        entityVersion: updatedHeat.version,
+        makerId: heat.plannedBy || 'LEGACY',
+        checkerId: currentUser.userId,
+        decision: ok ? 'APPROVED' : 'DOWNGRADED',
+        reason: ok ? 'Passing chemistry and physical laboratory evidence verified' : (tapRecord.downgradeNote || 'Downgraded')
+      });
+    } catch (_) {}
+  }
 
   return heatView(updatedHeat);
 }
@@ -345,7 +379,7 @@ function listCompleted() {
 }
 
 // ------------------------------------------------------------ invoices
-function createInvoice(body = {}) {
+function createInvoice(body = {}, currentUser = null) {
   const heat = store.heats.get(body.heatId);
   if (!heat) throw err(404, `Heat ${body.heatId} not found`);
   if (!heat.tap) throw err(409, `Heat ${heat.heatId} is not finished — approve the tap first`);
@@ -356,7 +390,13 @@ function createInvoice(body = {}) {
 
   const customer = CUSTOMERS.find((c) => c.id === body.customerId);
   if (!customer) throw err(400, 'Choose a customer');
-  if (!body.createdBy || !String(body.createdBy).trim()) throw err(400, 'Your name is required');
+
+  let creatorName = currentUser ? (currentUser.displayName || currentUser.username) : null;
+  if (!creatorName && body.createdBy && String(body.createdBy).trim()) {
+    creatorName = String(body.createdBy).trim();
+  }
+  if (!creatorName) throw err(400, 'Your name is required');
+  const creatorId = currentUser ? currentUser.userId : creatorName;
 
   const qtyKg = body.qtyKg !== undefined && body.qtyKg !== '' ? Number(body.qtyKg) : heat.tap.castingsKg;
   if (!(qtyKg > 0) || qtyKg > heat.tap.castingsKg) throw err(400, `Quantity must be between 1 and ${heat.tap.castingsKg} kg (castings from this heat)`);

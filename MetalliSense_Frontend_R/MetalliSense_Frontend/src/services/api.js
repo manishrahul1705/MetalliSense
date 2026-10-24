@@ -1,40 +1,55 @@
 import axios from "axios";
 
-// Local JWT auth: the token lives in an httpOnly cookie set by the backend
-// (see localAuthController.js), so we just need the browser to send cookies
-// on every request — no manual Authorization header needed.
+function getCookie(name) {
+  if (typeof document === 'undefined') return null;
+  const match = document.cookie.match(new RegExp('(^|;\\s*)(' + name + ')=([^;]*)'));
+  return match ? decodeURIComponent(match[3]) : null;
+}
+
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || "http://localhost:3000/api/v2",
   timeout: parseInt(import.meta.env.VITE_API_TIMEOUT) || 30000,
-  // No login/cookies in this build — credentials aren't needed, and
-  // leaving withCredentials on trips CORS ("Network Error") against a
-  // backend that doesn't send Access-Control-Allow-Credentials.
-  withCredentials: false,
+  withCredentials: true,
   headers: {
     "Content-Type": "application/json",
   },
 });
+
+// Request interceptor: attach X-CSRF-Token on mutating requests if present in cookies
+api.interceptors.request.use(
+  (config) => {
+    const method = (config.method || 'get').toUpperCase();
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+      const csrfToken = getCookie('metallisense_csrf');
+      if (csrfToken) {
+        config.headers['X-CSRF-Token'] = csrfToken;
+      }
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
 
 // Response interceptor for error handling
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response) {
-      // Handle 401 Unauthorized - token expired or invalid
+      // Handle 401 Unauthorized - redirect to login
       if (error.response.status === 401) {
-        const currentPath = window.location.pathname;
-        // Only redirect if not already on auth pages
+        const currentHash = window.location.hash || '';
+        const currentPath = window.location.pathname || '';
         if (
-          !currentPath.includes("/login") &&
-          !currentPath.includes("/signup")
+          !currentHash.includes("login") &&
+          !currentHash.includes("signup") &&
+          !currentPath.includes("login") &&
+          !currentPath.includes("signup")
         ) {
-          window.location.href = "/login";
+          window.location.hash = "#/login";
         }
       }
-      // Server responded with error
       console.error("API Error:", error.response.data);
     } else if (error.request) {
-      // Request made but no response
       console.error("Network Error:", error.message);
     }
     return Promise.reject(error);

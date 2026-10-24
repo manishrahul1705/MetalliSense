@@ -320,7 +320,7 @@ async function runGate(heatId, { by, expectedVersion, version } = {}) {
 }
 
 // ------------------------------------------------------------ interlock
-function startMelting(heatId, { operator, acknowledgeWarnings, override, expectedVersion, version } = {}) {
+function startMelting(heatId, { operator, acknowledgeWarnings, override, expectedVersion, version } = {}, currentUser = null) {
   const heat = store.heats.get(heatId);
   if (!heat) throw err(404, `Heat ${heatId} not found`);
   const expVer = expectedVersion !== undefined ? expectedVersion : version;
@@ -330,23 +330,40 @@ function startMelting(heatId, { operator, acknowledgeWarnings, override, expecte
     }
   }
   if (heat.status !== 'PLANNED' && heat.status !== 'GATE_EVALUATED') throw err(409, `Heat ${heatId} is already ${heat.status}`);
-  if (!operator) throw err(400, 'Operator name is required to start the furnace');
+  const opName = currentUser ? (currentUser.displayName || currentUser.username) : operator;
+  if (!opName) throw err(400, 'Operator name is required to start the furnace');
   const gate = heat.gate;
   if (!gate) throw err(428, 'Run the pre-melt check before starting the furnace');
   if (gate.fingerprint !== fingerprint(heat)) throw err(409, 'The charge or a lot changed since the last check. Run the pre-melt check again.', { code: 'GATE_STALE' });
   if (Date.now() > new Date(gate.validUntil).getTime()) throw err(409, `The check is older than ${settings.gateValidityMinutes} minutes. Run it again.`, { code: 'GATE_EXPIRED' });
 
   let mode = 'GO';
+  let overrideEngineer = null;
   if (gate.decision === 'WARN') {
     if (!acknowledgeWarnings) throw err(428, 'Acknowledge the warnings to start', { warnings: gate.warnings });
     mode = 'WARN_ACKNOWLEDGED';
   }
   if (gate.decision === 'HOLD') {
     if (!override) throw err(423, 'Furnace start is locked by the pre-melt gate', { blocking: gate.blocking });
-    if (!override.engineer || !override.reason || override.reason.trim().length < settings.overrideReasonMinLength) {
+    overrideEngineer = currentUser ? (currentUser.displayName || currentUser.username) : override.engineer;
+    if (!overrideEngineer || !override.reason || override.reason.trim().length < settings.overrideReasonMinLength) {
       throw err(400, `Override needs the engineer's name and a reason of at least ${settings.overrideReasonMinLength} characters`);
     }
     mode = 'ENGINEER_OVERRIDE';
+    if (currentUser) {
+      const isAuthorized = (currentUser.roles || []).some((r) => ['METALLURGIST', 'ADMIN'].includes(r));
+      if (!isAuthorized) {
+        throw err(403, 'Access denied: only Metallurgist or Administrator can authorize a furnace HOLD override', { code: 'FORBIDDEN_ROLE' });
+      }
+      const mc = require('./security').checkMakerCheckerSeparation({
+        entityType: 'FURNACE_HOLD_OVERRIDE',
+        entityId: heatId,
+        checkerUserId: currentUser.userId
+      });
+      if (!mc.allowed) {
+        throw err(403, mc.reason, { code: mc.code });
+      }
+    }
   }
 
   // Re-check stock right before deducting (another heat may have used it).
@@ -354,27 +371,40 @@ function startMelting(heatId, { operator, acknowledgeWarnings, override, expecte
     const avail = store.availableKg(l.lotId);
     if (Number(l.kg) > avail) throw err(409, `${l.lotId}: only ${avail} kg left. Run the check again.`);
   });
-  heat.charge.forEach((l) => store.addMovement({ lotId: l.lotId, type: 'CHARGE', kg: -Number(l.kg), heatId, by: operator, note: `Charged to ${heatId}` }));
+  heat.charge.forEach((l) => store.addMovement({ lotId: l.lotId, type: 'CHARGE', kg: -Number(l.kg), heatId, by: opName, note: `Charged to ${heatId}` }));
 
   heat.status = 'MELTING';
   // Freeze the energy prediction at furnace start, so later tariff/factor changes do not rewrite it.
   try { heat.energyAtStart = energy.gateSnapshot(heat, gate.decision); } catch { heat.energyAtStart = null; }
   heat.start = {
     at: new Date(),
-    by: operator,
+    by: opName,
     mode,
     gateId: gate.gateId,
     gateDecision: gate.decision,
     acknowledgedWarnings: mode === 'WARN_ACKNOWLEDGED' ? gate.warnings : [],
-    override: mode === 'ENGINEER_OVERRIDE' ? { engineer: override.engineer, reason: override.reason.trim(), blocking: gate.blocking } : null,
+    override: mode === 'ENGINEER_OVERRIDE' ? { engineer: overrideEngineer, reason: override.reason.trim(), blocking: gate.blocking } : null,
   };
-  store.log(mode === 'ENGINEER_OVERRIDE' ? 'FURNACE_START_OVERRIDE' : 'FURNACE_START', heatId, operator,
-    mode === 'ENGINEER_OVERRIDE' ? `HOLD overridden by ${override.engineer}: ${override.reason.trim()}` : `Started after ${gate.decision}`);
+  store.log(mode === 'ENGINEER_OVERRIDE' ? 'FURNACE_START_OVERRIDE' : 'FURNACE_START', heatId, opName,
+    mode === 'ENGINEER_OVERRIDE' ? `HOLD overridden by ${overrideEngineer}: ${override.reason.trim()}` : `Started after ${gate.decision}`);
   store.heats.update(heatId, {
     status: 'MELTING',
     start: heat.start,
     energyAtStart: heat.energyAtStart
   });
+  if (mode === 'ENGINEER_OVERRIDE' && currentUser) {
+    try {
+      require('./security').recordMakerCheckerReview({
+        entityType: 'FURNACE_HOLD_OVERRIDE',
+        entityId: heatId,
+        entityVersion: heat.version,
+        makerId: heat.plannedBy || 'LEGACY',
+        checkerId: currentUser.userId,
+        decision: 'OVERRIDE_APPROVED',
+        reason: override.reason.trim()
+      });
+    } catch (_) {}
+  }
   return store.heats.get(heatId);
 }
 

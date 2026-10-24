@@ -1,23 +1,55 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useState, useEffect } from "react";
+import api from "../services/api";
 
-// Login has been removed for this build — the backend has no auth routes.
-// This stub keeps existing components that call useAuth() (e.g. TopBar
-// showing a user name) from crashing, without making any network calls.
 const AuthContext = createContext({});
 
 export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider = ({ children }) => {
-  const [user] = useState({ name: "Guest", email: "" });
-  const [loading] = useState(false);
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Check current session on mount
+  useEffect(() => {
+    let mounted = true;
+    api.get("/auth/me")
+      .then((res) => {
+        if (mounted && res.data?.data?.user) {
+          setUser(res.data.data.user);
+        }
+      })
+      .catch(() => {
+        if (mounted) setUser(null);
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => { mounted = false; };
+  }, []);
+
+  const login = async (username, password) => {
+    const res = await api.post("/auth/login", { username, password });
+    if (res.data?.data?.user) {
+      setUser(res.data.data.user);
+      return res.data.data.user;
+    }
+    return null;
+  };
+
+  const logout = async () => {
+    try {
+      await api.post("/auth/logout");
+    } catch (_) {}
+    setUser(null);
+  };
 
   const value = {
     user,
     mongoUser: user,
     loading,
+    login,
+    logout,
     signup: async () => user,
-    login: async () => user,
-    logout: async () => {},
     updateUserProfile: async () => user,
   };
 

@@ -15,6 +15,7 @@ function makeRequest(serverUrl, { method, path, headers = {}, body = null }) {
       path: url.pathname + url.search,
       headers: {
         'Content-Type': 'application/json',
+        'X-Test-User-Id': 'operator1',
         ...headers
       }
     };
@@ -47,7 +48,9 @@ async function runTests() {
 
   // Create clean Express test app
   const app = express();
+  const { authenticate } = require('../authMiddleware');
   app.use(express.json());
+  app.use(authenticate);
   app.use('/api/v2/premelt', premelt.router);
   app.use('/api/v2/sales', salesRoutes);
 
@@ -175,6 +178,7 @@ async function runTests() {
       const res = await makeRequest(baseUrl, {
         method: 'POST',
         path: `/api/v2/sales/heats/${heat.heatId}/complete`,
+        headers: { 'X-Test-User-Id': 'qm1' },
         body: {
           approvedBy: 'engineer_1'
           // no composition provided
@@ -191,6 +195,7 @@ async function runTests() {
       const res = await makeRequest(baseUrl, {
         method: 'POST',
         path: `/api/v2/sales/heats/${heat.heatId}/complete`,
+        headers: { 'X-Test-User-Id': 'qm1' },
         body: {
           resume: true, // Gate bypass attempt
           approvedBy: 'bypasser'
@@ -206,7 +211,8 @@ async function runTests() {
 
       const res = await makeRequest(baseUrl, {
         method: 'GET',
-        path: `/api/v2/sales/certificates/${heat.heatId}`
+        path: `/api/v2/sales/certificates/${heat.heatId}`,
+        headers: { 'X-Test-User-Id': 'qm1' }
       });
 
       assert.strictEqual(res.statusCode, 409);
@@ -217,6 +223,7 @@ async function runTests() {
       const res = await makeRequest(baseUrl, {
         method: 'PATCH',
         path: '/api/v2/sales/config',
+        headers: { 'X-Test-User-Id': 'admin1' },
         body: {
           castingYieldPct: 75,
           returnsPct: 35 // Sum = 110%
@@ -231,7 +238,9 @@ async function runTests() {
       process.env.ENABLE_DEMO_RESET = 'false';
       const res = await makeRequest(baseUrl, {
         method: 'POST',
-        path: '/api/v2/premelt/demo/reset'
+        path: '/api/v2/premelt/demo/reset',
+        headers: { 'X-Test-User-Id': 'admin1' },
+        body: { adminPassword: 'AdminSecurePass123!', confirm: 'DEMO_RESET_CONFIRM' }
       });
       assert.strictEqual(res.statusCode, 403);
       process.env.ENABLE_DEMO_RESET = 'true';

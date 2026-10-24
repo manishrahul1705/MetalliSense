@@ -70,8 +70,8 @@ function closeDb() {
 // -----------------------------------------------------------------------------
 let inTransaction = false;
 
-function withTransaction(fn) {
-  const db = getDb();
+function withTransaction(fn, dbInstance = null) {
+  const db = dbInstance || getDb();
   if (inTransaction) {
     return fn(db);
   }
@@ -275,6 +275,128 @@ const MIGRATIONS = [
         CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_events(id DESC);
       `);
     }
+  },
+  {
+    version: 2,
+    name: '002_security_identities_and_rbac',
+    up(db) {
+      db.exec(`
+        -- Users
+        CREATE TABLE IF NOT EXISTS users (
+          user_id TEXT PRIMARY KEY,
+          username TEXT UNIQUE NOT NULL,
+          email TEXT UNIQUE NOT NULL,
+          display_name TEXT NOT NULL,
+          password_hash TEXT NOT NULL,
+          roles TEXT NOT NULL,
+          is_enabled INTEGER NOT NULL DEFAULT 1,
+          credential_version INTEGER NOT NULL DEFAULT 1,
+          failed_attempts INTEGER NOT NULL DEFAULT 0,
+          locked_until TEXT,
+          revoked_before TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          last_login_at TEXT
+        );
+
+        -- Machine Service Credentials
+        CREATE TABLE IF NOT EXISTS service_credentials (
+          service_id TEXT PRIMARY KEY,
+          service_name TEXT NOT NULL,
+          service_type TEXT NOT NULL,
+          api_key_hash TEXT NOT NULL,
+          allowed_sources TEXT NOT NULL,
+          permitted_evidence TEXT NOT NULL,
+          is_enabled INTEGER NOT NULL DEFAULT 1,
+          credential_version INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          last_auth_at TEXT
+        );
+
+        -- Sessions
+        CREATE TABLE IF NOT EXISTS sessions (
+          session_id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+          credential_version INTEGER NOT NULL,
+          created_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          last_activity_at TEXT NOT NULL,
+          is_revoked INTEGER NOT NULL DEFAULT 0,
+          ip_address TEXT,
+          user_agent TEXT
+        );
+
+        -- Maker-Checker Reviews
+        CREATE TABLE IF NOT EXISTS maker_checker_reviews (
+          review_id TEXT PRIMARY KEY,
+          entity_type TEXT NOT NULL,
+          entity_id TEXT NOT NULL,
+          entity_version INTEGER NOT NULL,
+          maker_id TEXT NOT NULL,
+          checker_id TEXT NOT NULL,
+          decision TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          reviewed_at TEXT NOT NULL,
+          is_superseded INTEGER NOT NULL DEFAULT 0
+        );
+
+        -- Security Events Audit Log
+        CREATE TABLE IF NOT EXISTS security_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          at TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          actor_id TEXT,
+          actor_type TEXT,
+          ip TEXT,
+          detail TEXT
+        );
+
+        -- Indexes
+        CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+        CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+        CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(session_id, is_revoked, expires_at);
+        CREATE INDEX IF NOT EXISTS idx_security_events_at ON security_events(id DESC);
+        CREATE INDEX IF NOT EXISTS idx_maker_checker_entity ON maker_checker_reviews(entity_type, entity_id);
+      `);
+
+      // Add columns to evidence if they do not exist
+      try { db.exec('ALTER TABLE evidence ADD COLUMN sample_id TEXT;'); } catch (_) {}
+      try { db.exec('ALTER TABLE evidence ADD COLUMN payload_hash TEXT;'); } catch (_) {}
+      try { db.exec('ALTER TABLE evidence ADD COLUMN ingested_by_service TEXT;'); } catch (_) {}
+
+      // Seed initial development/test users and service credentials
+      const crypto = require('crypto');
+      function quickScrypt(pw) {
+        const salt = crypto.randomBytes(16).toString('hex');
+        const derived = crypto.scryptSync(pw, salt, 32, { N: 16384, r: 8, p: 1 }).toString('hex');
+        return 'scrypt$16384$8$1$' + salt + '$' + derived;
+      }
+
+      const now = new Date().toISOString();
+      const insertUser = db.prepare(`
+        INSERT OR IGNORE INTO users (user_id, username, email, display_name, password_hash, roles, is_enabled, credential_version, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, ?)
+      `);
+
+      insertUser.run('USR-OP-01', 'operator1', 'operator1@example.com', 'Rajesh Operator', quickScrypt('OperatorPass123!'), JSON.stringify(['OPERATOR']), now, now);
+      insertUser.run('USR-MET-01', 'metallurgist1', 'metallurgist1@example.com', 'Dr. Aris Metallurgist', quickScrypt('MetallurgyPass123!'), JSON.stringify(['METALLURGIST']), now, now);
+      insertUser.run('USR-QM-01', 'qm1', 'qm1@example.com', 'Priya Quality Mgr', quickScrypt('QualityPass123!'), JSON.stringify(['QUALITY_MANAGER']), now, now);
+      insertUser.run('USR-INV-01', 'inventory1', 'inventory1@example.com', 'Suresh Stores', quickScrypt('InventoryPass123!'), JSON.stringify(['INVENTORY_CONTROLLER']), now, now);
+      insertUser.run('USR-FIN-01', 'finance1', 'finance1@example.com', 'Anand Finance', quickScrypt('FinancePass123!'), JSON.stringify(['SALES_FINANCE']), now, now);
+      insertUser.run('USR-ADM-01', 'admin1', 'admin1@example.com', 'Systems Administrator', quickScrypt('AdminSecurePass123!'), JSON.stringify(['ADMIN']), now, now);
+
+      // Seed service credentials
+      const insertSvc = db.prepare(`
+        INSERT OR IGNORE INTO service_credentials (service_id, service_name, service_type, api_key_hash, allowed_sources, permitted_evidence, is_enabled, credential_version, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?)
+      `);
+
+      const spectroHash = crypto.createHash('sha256').update('spectro-dev-token-secret-2026').digest('hex');
+      insertSvc.run('SVC-SPECTRO-01', 'Optical Emission Spectrometer', 'SPECTROMETER_SERVICE', spectroHash, JSON.stringify(['OES-01', 'OES-02', 'SPECTRO-LAB']), JSON.stringify(['MELT_MEASURED', 'POST_CORRECTION_MEASURED']), now);
+
+      const labHash = crypto.createHash('sha256').update('lab-dev-token-secret-2026').digest('hex');
+      insertSvc.run('SVC-LAB-01', 'Physical Testing Laboratory', 'LAB_SERVICE', labHash, JSON.stringify(['UTM-01', 'IMPACT-01', 'HARDNESS-01']), JSON.stringify(['LAB_MEASURED']), now);
+    }
   }
 ];
 
@@ -305,7 +427,7 @@ function runMigrations(targetDb = null) {
         m.up(txDb);
         txDb.prepare('INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)')
           .run(m.version, m.name, new Date().toISOString());
-      });
+      }, db);
       appliedCount++;
     }
   }
