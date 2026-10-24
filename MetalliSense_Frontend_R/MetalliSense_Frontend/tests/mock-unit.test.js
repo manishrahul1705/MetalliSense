@@ -76,6 +76,15 @@ describe('stock transaction safeguards',()=>{
  });
 });
 
+it('RL candidates clamp all negative additions to zero (induction furnace invariant)',async()=>{
+ const r=await dispatch('POST','http://local/rl/optimize',{grade:'SG-IRON',composition:{Fe:90,C:4.3,Si:2.9,Mn:.8,P:.03,S:.01}});
+ for(const c of r.data.candidates){
+  for(const [el,v] of Object.entries(c.recommended_additions)){
+   expect(v).toBeGreaterThan(0);
+  }
+ }
+});
+
 it('RL candidates explicitly exclude unsupported impurity additions before approval',async()=>{
  const r=await dispatch('POST','http://local/rl/optimize',{grade:'SG-IRON',composition:{Fe:93,C:2.9,Si:1.7,Mn:.2,P:.035,S:.013}});
  for(const c of r.data.candidates){expect(c.recommended_additions.P||0).toBe(0);expect(c.recommended_additions.S||0).toBe(0);if(c.excluded_additions.S)expect(c.constraint_violations.S).toMatch(/Excluded/);}

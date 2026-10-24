@@ -61,7 +61,7 @@ AGGRESSIVENESS_LEVELS = {
 
 
 def _scale_additions(base: Dict[str, float], scale: float) -> Dict[str, float]:
-    return {el: float(base.get(el, 0.0)) * scale for el in ELEMENTS}
+    return {el: max(0.0, float(base.get(el, 0.0))) * scale for el in ELEMENTS}
 
 
 def _distance_to_midpoint(grade_gen: GradeSpecificationGenerator, grade: str, composition: Dict[str, float]) -> float:
@@ -108,7 +108,7 @@ class RLOptimizationEngine:
                 {
                     "strategy": label,
                     "aggressiveness": scale,
-                    "recommended_additions": {k: round(v, 4) for k, v in clipped.items() if abs(v) > 1e-6},
+                    "recommended_additions": {k: round(v, 4) for k, v in clipped.items() if v > 1e-6},
                     "predicted_reward": round(predicted_reward, 4),
                     "estimated_cost": round(cost_of(clipped), 4),
                     "constraint_violations": violations,

@@ -47,9 +47,9 @@ export async function createAI(req,state,notify){
  async function optimize(b){
   const grade=b.grade,c=b.composition,base=await alloy(grade,c);const candidates=[];
   for(const [strategy,aggressiveness]of Object.entries({conservative:.3,balanced:1,aggressive:2})){
-   let a=Object.fromEntries(E.map(e=>[e,clamp((base.recommended_additions[e]||0)*aggressiveness,-limits[e],limits[e])]));const total=Object.values(a).reduce((s,v)=>s+Math.abs(v),0);if(total>6)a=Object.fromEntries(Object.entries(a).map(([e,v])=>[e,v*6/total]));
+   let a=Object.fromEntries(E.map(e=>[e,clamp((base.recommended_additions[e]||0)*aggressiveness,0,limits[e])]));const total=Object.values(a).reduce((s,v)=>s+Math.abs(v),0);if(total>6)a=Object.fromEntries(Object.entries(a).map(([e,v])=>[e,v*6/total]));
    const flags={},excluded_additions={};for(const e of ['P','S'])if(a[e]>0){excluded_additions[e]=round(a[e]);a[e]=0;flags[e]='Excluded: no approved inventory additive for '+e+'; review charge chemistry';}for(const e of E)if(Math.abs(a[e])>=limits[e]-1e-9)flags[e]='Hit max single-pass addition limit ('+limits[e]+'%)';if(total>=6)flags._total='Hit max total addition limit (6%)';
-   candidates.push({strategy,aggressiveness,excluded_additions,recommended_additions:Object.fromEntries(Object.entries(a).filter(([,v])=>Math.abs(v)>1e-6).map(([e,v])=>[e,round(v)])),predicted_reward:round(evaluate(state().reward,features(grade,c,a,aggressiveness))),estimated_cost:round(cost(a)),constraint_violations:flags,requires_human_approval:true});
+   candidates.push({strategy,aggressiveness,excluded_additions,recommended_additions:Object.fromEntries(Object.entries(a).filter(([,v])=>v>1e-6).map(([e,v])=>[e,round(v)])),predicted_reward:round(evaluate(state().reward,features(grade,c,a,aggressiveness))),estimated_cost:round(cost(a)),constraint_violations:flags,requires_human_approval:true});
   }
   return {grade,deviation:deviation(grade,c),base_recommendation_confidence:base.confidence,candidates:candidates.sort((a,b)=>b.predicted_reward-a.predicted_reward).slice(0,b.top_k||3),policy_status:status(),note:'All candidates are advisory only. A qualified operator must review and approve before any addition is made on the floor.'};
  }

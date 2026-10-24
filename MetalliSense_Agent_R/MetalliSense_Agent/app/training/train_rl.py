@@ -27,10 +27,16 @@ loop" is powered entirely by real plant outcomes, exactly as the feature
 description requires. The online `/rl/feedback` endpoint already
 supports this today via its `actual_result` field.
 """
+import random
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+
+# S0-014: Ensure deterministic reproduction of RL offline bootstrap
+random.seed(42)
+np.random.seed(42)
 
 sys.path.append(str(Path(__file__).parent.parent))
 

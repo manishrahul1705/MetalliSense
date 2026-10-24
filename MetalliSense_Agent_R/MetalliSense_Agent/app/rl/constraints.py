@@ -43,14 +43,18 @@ MAX_TOTAL_ADDITION = 6.0
 
 
 def clip_additions(additions: Dict[str, float]) -> Dict[str, float]:
-    """Clip a candidate correction to per-element and total safety bounds."""
+    """Clip a candidate correction to per-element and total safety bounds.
+    
+    S0-013: Coreless induction melting furnaces cannot physically subtract
+    alloys from a liquid melt. Additions must be strictly non-negative (>= 0).
+    """
     clipped = {}
     for el in ELEMENTS:
         val = float(additions.get(el, 0.0))
         limit = ELEMENT_MAX_ADDITION.get(el, MAX_ADDITION_PERCENTAGE)
-        clipped[el] = max(-limit, min(limit, val))
+        clipped[el] = max(0.0, min(limit, val))
 
-    total = sum(abs(v) for v in clipped.values())
+    total = sum(v for v in clipped.values())
     if total > MAX_TOTAL_ADDITION and total > 0:
         scale = MAX_TOTAL_ADDITION / total
         clipped = {el: v * scale for el, v in clipped.items()}
@@ -63,13 +67,13 @@ def constraint_violations(additions: Dict[str, float]) -> Dict[str, str]:
     for el in ELEMENTS:
         val = float(additions.get(el, 0.0))
         limit = ELEMENT_MAX_ADDITION.get(el, MAX_ADDITION_PERCENTAGE)
-        if abs(val) >= limit - 1e-9:
+        if val >= limit - 1e-9:
             violations[el] = f"Hit max single-pass addition limit ({limit}%)"
-    total = sum(abs(float(v)) for v in additions.values())
+    total = sum(float(v) for v in additions.values())
     if total >= MAX_TOTAL_ADDITION - 1e-9:
         violations["_total"] = f"Hit max total addition limit ({MAX_TOTAL_ADDITION}%)"
     return violations
 
 
 def cost_of(additions: Dict[str, float]) -> float:
-    return sum(abs(float(v)) * ELEMENT_COST_WEIGHT.get(el, 1.0) for el, v in additions.items())
+    return sum(float(v) * ELEMENT_COST_WEIGHT.get(el, 1.0) for el, v in additions.items())
