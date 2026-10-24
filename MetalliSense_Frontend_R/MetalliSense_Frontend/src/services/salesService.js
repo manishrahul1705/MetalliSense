@@ -3,7 +3,10 @@ import api from "./api";
 // Sales & Dispatch — backend routes under /api/v2/sales.
 const P = "/sales";
 
-export const completeHeat = (heatId, data) => api.post(`${P}/heats/${heatId}/complete`, data);
+export const completeHeat = (heatId, data = {}) => {
+  const { resume, ...payload } = data;
+  return api.post(`${P}/heats/${heatId}/complete`, payload);
+};
 export const getFinishedHeats = () => api.get(`${P}/heats`);
 export const getCertificate = (heatId) => api.get(`${P}/certificates/${heatId}`);
 export const getCustomers = () => api.get(`${P}/customers`);

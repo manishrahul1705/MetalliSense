@@ -221,7 +221,7 @@ function completeHeat(heatId, body = {}) {
 
   // Execute explicit state transition with optimistic concurrency
   const updatedHeat = transitionHeat(heatId, HEAT_STATES.COMPLETED, {
-    expectedVersion: body.version,
+    expectedVersion: body.version !== undefined ? body.version : body.expectedVersion,
     actor: engineerName,
     note: `Tap approved by ${engineerName} (${tapRecord.result})`,
     extraUpdates: {

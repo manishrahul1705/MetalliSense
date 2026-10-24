@@ -246,9 +246,15 @@ async function aiCheck(grade, pred) {
 }
 
 // ------------------------------------------------------------------ run
-async function runGate(heatId, { by } = {}) {
+async function runGate(heatId, { by, expectedVersion, version } = {}) {
   const heat = store.heats.get(heatId);
   if (!heat) throw err(404, `Heat ${heatId} not found`);
+  const expVer = expectedVersion !== undefined ? expectedVersion : version;
+  if (expVer !== undefined && expVer !== null) {
+    if (Number(expVer) !== Number(heat.version || 0)) {
+      throw err(409, `Optimistic concurrency conflict on heat ${heatId}: expected version ${expVer}, but current version is ${heat.version}`);
+    }
+  }
   if (heat.status !== 'PLANNED') throw err(409, `Heat ${heatId} is ${heat.status}; the gate runs before melting`);
   const spec = specFor(heat.grade);
   if (!spec) throw err(400, `No specification for grade ${heat.grade}`);
@@ -314,9 +320,15 @@ async function runGate(heatId, { by } = {}) {
 }
 
 // ------------------------------------------------------------ interlock
-function startMelting(heatId, { operator, acknowledgeWarnings, override } = {}) {
+function startMelting(heatId, { operator, acknowledgeWarnings, override, expectedVersion, version } = {}) {
   const heat = store.heats.get(heatId);
   if (!heat) throw err(404, `Heat ${heatId} not found`);
+  const expVer = expectedVersion !== undefined ? expectedVersion : version;
+  if (expVer !== undefined && expVer !== null) {
+    if (Number(expVer) !== Number(heat.version || 0)) {
+      throw err(409, `Optimistic concurrency conflict on heat ${heatId}: expected version ${expVer}, but current version is ${heat.version}`);
+    }
+  }
   if (heat.status !== 'PLANNED' && heat.status !== 'GATE_EVALUATED') throw err(409, `Heat ${heatId} is already ${heat.status}`);
   if (!operator) throw err(400, 'Operator name is required to start the furnace');
   const gate = heat.gate;

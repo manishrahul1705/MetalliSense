@@ -36,13 +36,22 @@ export const getHeats = () => api.get(`${P}/heats`);
 export const getHeat = (heatId) => api.get(`${P}/heats/${heatId}`);
 export const planHeat = (data) => api.post(`${P}/heats`, data);
 export const updateCharge = (heatId, data) => api.put(`${P}/heats/${heatId}/charge`, data);
-export const runGateCheck = (heatId, by) => api.post(`${P}/heats/${heatId}/gate-check`, { by });
-export const startMelting = (heatId, data) => api.post(`${P}/heats/${heatId}/start-melting`, data);
+export const runGateCheck = (heatId, optionsOrBy) => {
+  const payload = typeof optionsOrBy === 'string' ? { by: optionsOrBy } : (optionsOrBy || {});
+  return api.post(`${P}/heats/${heatId}/gate-check`, payload);
+};
+export const startMelting = (heatId, data = {}) => api.post(`${P}/heats/${heatId}/start-melting`, data);
 
 export const getPremeltConfig = () => api.get(`${P}/config`);
 
 // Additive-specific endpoints
-export const deductAdditives = (lines) => api.post(`${P}/additives/deduct`, { lines });
+export const deductAdditives = (lines, options = {}) => {
+  const key = typeof options === 'string'
+    ? options
+    : (options?.idempotencyKey || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `deduct-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`));
+  const headers = { 'Idempotency-Key': key };
+  return api.post(`${P}/additives/deduct`, { lines }, { headers });
+};
 export const receiveFerroalloy = (data) => api.post(`${P}/additives/receive`, data);
 export const getAudit = (limit = 50) => api.get(`${P}/audit`, { params: { limit } });
 export const resetDemo = () => api.post(`${P}/demo/reset`);

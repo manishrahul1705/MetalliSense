@@ -10,6 +10,31 @@ function err(status, message, extra = {}) {
   return Object.assign(new Error(message), { status, ...extra });
 }
 
+let inTransaction = false;
+
+// Test-only fault injection seam
+let _testFaultHook = null;
+
+function __setTestFaultHook(hook) {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('FAULT_INJECTION_DISALLOWED_IN_PRODUCTION');
+  }
+  _testFaultHook = hook;
+}
+
+function __clearTestFaultHook() {
+  _testFaultHook = null;
+}
+
+function triggerFault(stage) {
+  if (process.env.NODE_ENV === 'production' || !_testFaultHook) {
+    return;
+  }
+  if (typeof _testFaultHook === 'function') {
+    _testFaultHook(stage);
+  }
+}
+
 // Convert kilograms to integer base units (grams) to avoid floating-point errors
 function toGrams(kg) {
   return Math.round(Number(kg) * 1000);
@@ -130,7 +155,8 @@ function deductAdditivesAtomic({ lines, heatId, idempotencyKey, by, note }) {
   }
 
   // 4. Execute atomic transaction
-  return withTransaction((txDb) => {
+  const txResult = withTransaction((txDb) => {
+    triggerFault('AFTER_VALIDATION_BEFORE_WRITES');
     const results = [];
     const nowIso = new Date().toISOString();
     const actorStr = String(by || lines[0].by || 'unverified_operator').trim();
@@ -178,6 +204,8 @@ function deductAdditivesAtomic({ lines, heatId, idempotencyKey, by, note }) {
         note || `Atomic deduction for heat ${targetHeatId}: ${demand.alloyName || lotRow.alloy_name || lotRow.description}`,
         nowIso
       );
+
+      triggerFault('AFTER_FIRST_WRITE');
 
       const remainingGrams = getAvailableGrams(txDb, lotId);
       const remainingKg = fromGrams(remainingGrams);
@@ -234,12 +262,17 @@ function deductAdditivesAtomic({ lines, heatId, idempotencyKey, by, note }) {
       nowIso
     );
 
+    triggerFault('BEFORE_COMMIT');
+
     return {
       idempotent_replay: false,
       statusCode: 200,
       data: responsePayload
     };
   });
+
+  triggerFault('AFTER_COMMIT_BEFORE_RESPONSE');
+  return txResult;
 }
 
 module.exports = {
@@ -247,5 +280,7 @@ module.exports = {
   getAvailableGrams,
   getAvailableKg,
   toGrams,
-  fromGrams
+  fromGrams,
+  __setTestFaultHook,
+  __clearTestFaultHook
 };

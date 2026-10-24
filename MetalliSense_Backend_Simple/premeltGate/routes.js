@@ -270,7 +270,7 @@ router.put('/heats/:heatId/charge', wrap((req) => {
   store.heats.update(req.params.heatId, { charge: h.charge, targetKg: h.targetKg, grade: h.grade });
   return { ...heatView(store.heats.get(req.params.heatId)), gateResult: h.gate };
 }));
-router.post('/heats/:heatId/gate-check', wrap((req) => gate.runGate(req.params.heatId, { by: req.body?.by })));
+router.post('/heats/:heatId/gate-check', wrap((req) => gate.runGate(req.params.heatId, req.body || {})));
 router.post('/heats/:heatId/start-melting', wrap((req) => heatView(gate.startMelting(req.params.heatId, req.body || {}))));
 
 // ================================================================ misc

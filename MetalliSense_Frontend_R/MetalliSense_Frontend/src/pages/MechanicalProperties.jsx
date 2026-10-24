@@ -23,6 +23,7 @@ import toast from "react-hot-toast";
 import { formatPercentage } from "../utils/formatters";
 import { MeltSpinner } from "../components/common/FurnaceLoader";
 import { completeHeat, getFinishedHeats } from "../services/salesService";
+import { errMsg } from "../components/premelt/premeltUi";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3000";
 
@@ -257,7 +258,8 @@ export default function MechanicalProperties() {
         standard: std,
         acceptedStrategy: flow.acceptedStrategy,
         gateDecision: flow.gateDecision,
-        resume: true, // if the server was restarted during the melt, close the heat from this saved flow
+        version: flow.version,
+        expectedVersion: flow.version,
       });
       setFinished(res.data.data);
       setServerMissing(false);
@@ -265,7 +267,7 @@ export default function MechanicalProperties() {
       const t = res.data.data.tap;
       toast.success(`✅ Tap approved — ${flow.heatId} finished: ${t.castingsKg} kg castings${t.result === "DOWNGRADED" ? ` (downgraded to ${t.soldGrade})` : ""}`);
     } catch (e) {
-      toast.error(e?.response?.data?.message || e.message, { id: "tap-error", duration: 7000 });
+      toast.error(errMsg(e), { id: "tap-error", duration: 7000 });
     } finally { setApproving(false); }
   };
 

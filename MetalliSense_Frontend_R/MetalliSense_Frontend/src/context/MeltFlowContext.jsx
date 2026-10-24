@@ -34,6 +34,8 @@ const INITIAL = {
   // The heat that passed the gate
   heatId: null,
   grade: null,
+  status: null,
+  version: null,
   targetKg: null,
   chargeKg: null,
   metalKg: null,
@@ -77,6 +79,8 @@ function reducer(state, action) {
         ...INITIAL,
         heatId: action.heatId,
         grade: action.grade,
+        status: action.status || 'MELTING',
+        version: action.version ?? 1,
         targetKg: action.targetKg,
         chargeKg: action.chargeKg,
         metalKg: action.metalKg,
@@ -104,6 +108,12 @@ function reducer(state, action) {
       return { ...state, mechResult: action.result };
     case 'TAP_APPROVED':
       return { ...state, tapApproved: true };
+    case 'UPDATE_SERVER_HEAT':
+      return {
+        ...state,
+        ...(action.status ? { status: action.status } : {}),
+        ...(action.version !== undefined ? { version: action.version } : {}),
+      };
     case 'STRATEGY_REJECTED':
       // All strategies rejected → clear RL result so the operator must re-run
       return { ...state, rlResult: null, acceptedStrategy: null };
@@ -148,6 +158,8 @@ export function MeltFlowProvider({ children }) {
       type: 'GATE_PASSED',
       heatId: heat.heatId,
       grade: heat.grade,
+      status: heat.status || 'MELTING',
+      version: heat.version,
       targetKg: heat.targetKg,
       chargeKg: pred?.chargeKg ?? null,
       metalKg: pred?.metalKg ?? null,
@@ -170,6 +182,10 @@ export function MeltFlowProvider({ children }) {
   const rejectAll      = useCallback(()  => dispatch({ type: 'STRATEGY_REJECTED' }), []);
   const mechDone       = useCallback((r) => dispatch({ type: 'MECH_DONE', result: r }), []);
   const approveTap     = useCallback(()  => dispatch({ type: 'TAP_APPROVED' }), []);
+  const updateServerHeat = useCallback((h) => {
+    if (!h) return;
+    dispatch({ type: 'UPDATE_SERVER_HEAT', status: h.status, version: h.version });
+  }, []);
   const reset          = useCallback(()  => dispatch({ type: 'RESET' }), []);
 
   // Convenience: is the flow unlocked?
@@ -186,7 +202,7 @@ export function MeltFlowProvider({ children }) {
     <MeltFlowContext.Provider value={{
       flow, isUnlocked,
       canRunAnomaly, canRunAlloy, canRunRL, canAccept, canRunMech,
-      gatePassed, anomalyDone, alloyDone, rlDone,
+      gatePassed, updateServerHeat, anomalyDone, alloyDone, rlDone,
       acceptStrategy, rejectAll, mechDone, approveTap, reset,
     }}>
       {children}

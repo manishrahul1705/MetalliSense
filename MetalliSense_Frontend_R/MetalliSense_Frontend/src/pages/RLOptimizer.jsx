@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import Card from "../components/common/Card";
 import Badge from "../components/common/Badge";
 import Button from "../components/common/Button";
@@ -10,6 +10,7 @@ import { useNavigate } from "react-router-dom";
 import GateBanner from "../components/premelt/GateBanner";
 import { useMeltFlow } from "../context/MeltFlowContext";
 import { deductAdditives } from "../services/premeltService";
+import { errMsg } from "../components/premelt/premeltUi";
 import StrategyComparison, { buildComparison } from "../components/rl/StrategyComparison";
 import toast from "react-hot-toast";
 import { formatPercentage } from "../utils/formatters";
@@ -113,6 +114,16 @@ const RLOptimizer = () => {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(null); // strategy name being submitted
   const [policyStatus, setPolicyStatus] = useState(null);
+  const deductionKeysRef = useRef({});
+
+  const getDeductionKey = (strategyName) => {
+    if (!deductionKeysRef.current[strategyName]) {
+      deductionKeysRef.current[strategyName] = typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `deduct-${flow.heatId || 'heat'}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    }
+    return deductionKeysRef.current[strategyName];
+  };
 
   useEffect(() => {
     loadPolicyStatus();
@@ -180,8 +191,8 @@ const RLOptimizer = () => {
   };
 
   const handleFeedback = async (candidate, outcome) => {
-    if (!reading) {
-      toast.error("No active reading — generate a synthetic reading first");
+    if (!reading || submitting) {
+      if (!reading) toast.error("No active reading — generate a synthetic reading first");
       return;
     }
     setSubmitting(candidate.strategy);
@@ -208,6 +219,7 @@ const RLOptimizer = () => {
         if (isUnlocked && flow.heatId) {
           // Deduct additive lots from inventory when operator accepts a strategy.
           // The gate already computed which lot and how many kg for each element.
+          const idempotencyKey = getDeductionKey(candidate.strategy);
           try {
             // Build deduction lines from the gate's suggested additions (which have lotId + kg)
             const gateAdditions = flow.suggestedAdditions || [];
@@ -222,14 +234,15 @@ const RLOptimizer = () => {
               }));
 
             if (lines.length > 0) {
-              await deductAdditives(lines);
+              await deductAdditives(lines, { idempotencyKey });
             }
             acceptStrategy({ ...candidate, deductedLines: lines });
             toast.success(`✅ Strategy "${candidate.strategy}" accepted — stock deducted. Policy updated.`);
           } catch (deductErr) {
             console.error("Deduction error:", deductErr);
-            acceptStrategy(candidate);
-            toast.success(`Strategy accepted and policy updated. (Stock deduction failed: ${deductErr.response?.data?.message || deductErr.message})`);
+            toast.error(`Stock deduction failed: ${errMsg(deductErr)}`);
+            setSubmitting(null);
+            return;
           }
         } else {
           toast.success(`Feedback recorded — policy updated (accepted)`);
@@ -568,7 +581,7 @@ const RLOptimizer = () => {
                         size="sm"
                         variant="success"
                         className="flex-1"
-                        disabled={submitting === c.strategy || flow.stockStatus === 'deducted'}
+                        disabled={!!submitting || flow.stockStatus === 'deducted'}
                         onClick={() => handleFeedback(c, "accepted")}
                       >
                         {flow.stockStatus === 'deducted' && flow.acceptedStrategy?.strategy === c.strategy
@@ -581,7 +594,7 @@ const RLOptimizer = () => {
                         size="sm"
                         variant="danger"
                         className="flex-1"
-                        disabled={submitting === c.strategy}
+                        disabled={!!submitting}
                         onClick={() => handleFeedback(c, "rejected")}
                       >
                         <ThumbsDown className="w-3 h-3 mr-1" /> Reject

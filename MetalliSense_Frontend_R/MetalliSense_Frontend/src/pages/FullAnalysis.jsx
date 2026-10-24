@@ -9,6 +9,8 @@ import Badge from "../components/common/Badge";
 import SyntheticGenerator from "../components/common/SyntheticGenerator";
 import { runFullAnalysis } from "../services/workflowService";
 import { rlSubmitFeedback } from "../services/rlService";
+import { deductAdditives } from "../services/premeltService";
+import { errMsg } from "../components/premelt/premeltUi";
 import toast from "react-hot-toast";
 import { MeltSpinner } from "../components/common/FurnaceLoader";
 
@@ -131,7 +133,7 @@ export default function FullAnalysis() {
   };
 
   const handleFeedback = async (candidate, outcome) => {
-    if (!reading || chosenStrategy) return;
+    if (!reading || chosenStrategy || submitting) return;
     setSubmitting(candidate.strategy);
     try {
       if (import.meta.env.VITE_MOCK_MODE === 'true' && outcome === 'accepted' && isUnlocked && flow.heatId) {
@@ -151,16 +153,45 @@ export default function FullAnalysis() {
         outcome,
         operatorNote: `Operator ${outcome} the "${candidate.strategy}" strategy from Full Analysis`,
       });
-      if (outcome === "accepted") setChosenStrategy(candidate.strategy);
-      if (outcome === "accepted" && isUnlocked) {
-        acceptStrategy(candidate);
-        toast.success(`✅ Strategy accepted — stock deducted. Proceed to Mechanical Properties.`);
+      if (outcome === "accepted") {
+        if (isUnlocked && flow.heatId) {
+          const idempotencyKey = typeof crypto !== 'undefined' && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `deduct-${flow.heatId}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+          const gateAdditions = flow.suggestedAdditions || [];
+          const lines = gateAdditions
+            .filter(a => a.lotId && a.kg > 0)
+            .map(a => ({
+              lotId: a.lotId,
+              kg: a.kg,
+              heatId: flow.heatId,
+              by: 'operator',
+              alloyName: a.alloyName,
+            }));
+
+          if (lines.length > 0) {
+            try {
+              await deductAdditives(lines, { idempotencyKey });
+            } catch (deductErr) {
+              console.error("Deduction error in full analysis:", deductErr);
+              toast.error(`Stock deduction failed: ${errMsg(deductErr)}`);
+              setSubmitting(null);
+              return;
+            }
+          }
+          acceptStrategy({ ...candidate, deductedLines: lines });
+          setChosenStrategy(candidate.strategy);
+          toast.success(`✅ Strategy accepted — stock deducted. Proceed to Mechanical Properties.`);
+        } else {
+          setChosenStrategy(candidate.strategy);
+          toast.success(`Feedback recorded (${outcome})`);
+        }
       } else {
         toast.success(`Feedback recorded (${outcome})`);
       }
     } catch (err) {
       console.error("Feedback failed:", err);
-      toast.error(err.response?.data?.message || "Failed to record feedback");
+      toast.error(err.response?.data?.message || err.message || "Failed to record feedback");
     } finally {
       setSubmitting(null);
     }

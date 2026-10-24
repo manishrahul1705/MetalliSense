@@ -10,7 +10,7 @@ import {
   getHeats, getHeat, planHeat, updateCharge, runGateCheck, startMelting, getLots, getPremeltConfig, getAudit, resetDemo,
 } from "../services/premeltService";
 import { useMeltFlow } from "../context/MeltFlowContext";
-import { StatusPill, CheckPill, ChemBar, Field, inputCls, kg, errMsg, SOURCE_LABEL } from "../components/premelt/premeltUi";
+import { StatusPill, CheckPill, ChemBar, Field, inputCls, kg, errMsg, SOURCE_LABEL, HeatStatusPill } from "../components/premelt/premeltUi";
 import { MeltSpinner } from "../components/common/FurnaceLoader";
 
 const DECISION = {
@@ -149,16 +149,30 @@ function Interlock({ heat, gate, dirty, onStarted, onGatePassed, onContinue }) {
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 15000); return () => clearInterval(t); }, []);
   useEffect(() => { setAck(false); setShowOverride(false); }, [gate?.gateId]);
 
-  if (heat.status !== "PLANNED") {
+  if (heat.status !== "PLANNED" && heat.status !== "GATE_EVALUATED") {
     const s = heat.start;
+    const isTerminal = heat.status === "RELEASED" || heat.status === "REJECTED";
+    const isCompleted = heat.status === "COMPLETED";
+    const isHeld = heat.status === "HELD";
     return (
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-metal-950 via-metal-900 to-orange-950 text-white p-6 shadow-metal-xl">
+      <div className={clsx(
+        "relative overflow-hidden rounded-2xl p-6 text-white shadow-metal-xl",
+        isTerminal ? (heat.status === "RELEASED" ? "bg-gradient-to-br from-emerald-950 via-metal-900 to-teal-950" : "bg-gradient-to-br from-red-950 via-metal-900 to-zinc-950")
+        : isCompleted ? "bg-gradient-to-br from-teal-950 via-metal-900 to-cyan-950"
+        : isHeld ? "bg-gradient-to-br from-amber-950 via-metal-900 to-yellow-950"
+        : "bg-gradient-to-br from-metal-950 via-metal-900 to-orange-950"
+      )}>
         <div className="pointer-events-none absolute -right-10 -top-10 w-48 h-48 rounded-full bg-orange-500/20 blur-3xl" />
         <div className="flex flex-wrap items-center gap-3">
-          <span className="grid place-items-center w-11 h-11 rounded-xl bg-orange-500/20 ring-1 ring-orange-400/40"><Flame className="text-orange-400 animate-pulse" /></span>
+          <span className="grid place-items-center w-11 h-11 rounded-xl bg-orange-500/20 ring-1 ring-orange-400/40">
+            {isCompleted || heat.status === "RELEASED" ? <ShieldCheck className="text-emerald-400" /> : isHeld ? <AlertTriangle className="text-amber-400" /> : <Flame className="text-orange-400 animate-pulse" />}
+          </span>
           <div className="flex-1">
-            <p className="text-[11px] uppercase tracking-widest text-orange-300/80 font-semibold">Furnace running</p>
-            <p className="text-xl font-bold">{heat.heatId} is melting</p>
+            <div className="flex items-center gap-2">
+              <p className="text-[11px] uppercase tracking-widest text-orange-300/80 font-semibold">Heat Workflow</p>
+              <HeatStatusPill status={heat.status} />
+            </div>
+            <p className="text-xl font-bold">{heat.heatId} — {heat.status}</p>
           </div>
           {gate && <ReadAloud text={() => gateSpeech(heat, gate)} label="Read gate result" variant="dark" />}
         </div>
@@ -169,8 +183,19 @@ function Interlock({ heat, gate, dirty, onStarted, onGatePassed, onContinue }) {
             {s.mode === "ENGINEER_OVERRIDE" && ` HOLD overridden by ${s.override.engineer}: “${s.override.reason}”.`}
           </p>
         )}
-        <p className="text-sm text-metal-300 mt-2">Charge reserved. The gate's predicted melt-down chemistry now feeds Composition Deviation Analysis → Melt Correction Planner → Adaptive Strategy Optimizer.</p>
-        {gate?.prediction && onContinue && (
+        {isCompleted && (
+          <p className="text-sm text-teal-200 mt-2">Heat tap approved. Ready for dispatch, invoicing and mill test certification.</p>
+        )}
+        {isHeld && (
+          <p className="text-sm text-amber-200 mt-2">Heat is on HOLD. Quality review required before proceeding.</p>
+        )}
+        {isTerminal && (
+          <p className="text-sm text-metal-300 mt-2">Terminal state reached ({heat.status}). Heat lifecycle finalized; further mutations disabled.</p>
+        )}
+        {!isTerminal && !isCompleted && (
+          <p className="text-sm text-metal-300 mt-2">Charge reserved. The gate's predicted melt-down chemistry now feeds Composition Deviation Analysis → Melt Correction Planner → Adaptive Strategy Optimizer.</p>
+        )}
+        {gate?.prediction && onContinue && !isTerminal && (
           <button type="button" onClick={() => onContinue(heat, gate)}
             className="mt-4 inline-flex items-center gap-2 rounded-xl bg-white text-metal-900 px-4 py-2.5 text-sm font-bold shadow hover:bg-primary-50 transition-colors">
             <BrainCircuit size={16} className="text-primary-600" /> Continue to AI analysis <ArrowRight size={15} />
@@ -197,12 +222,21 @@ function Interlock({ heat, gate, dirty, onStarted, onGatePassed, onContinue }) {
   const start = async (override) => {
     setBusy(true);
     try {
-      await startMelting(heat.heatId, { operator, acknowledgeWarnings: ack, override });
+      await startMelting(heat.heatId, {
+        operator,
+        acknowledgeWarnings: ack,
+        override,
+        expectedVersion: heat.version,
+        version: heat.version,
+      });
       toast.success(`${heat.heatId}: furnace started`);
       if (gate?.prediction && onGatePassed) onGatePassed(heat, gate);
       onStarted();
     } catch (e) {
       toast.error(errMsg(e));
+      if (e?.response?.status === 409 && onStarted) {
+        onStarted();
+      }
     } finally {
       setBusy(false);
     }
@@ -444,7 +478,10 @@ export default function PreMeltGate() {
                     </span>
                     {h.gate && h.status === "PLANNED" && <span className={clsx("text-[10px] font-black px-1.5 rounded", DECISION[h.gate.decision].slab)}>{h.gate.decision}</span>}
                   </span>
-                  <span className="block text-xs text-metal-500">{h.grade} · {h.status.toLowerCase()}</span>
+                  <span className="flex items-center justify-between text-xs text-metal-500 mt-1">
+                    <span>{h.grade}</span>
+                    <HeatStatusPill status={h.status} className="scale-90 origin-right" />
+                  </span>
                 </button>
               ))}
             </div>
