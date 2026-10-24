@@ -11,6 +11,7 @@ const { ingestCsv } = require('./gunIngest');
 const { simulateSession, toCsv, SCENARIOS } = require('./gunSimulator');
 const gate = require('./gateEngine');
 const config = require('./config');
+const inventoryLedger = require('./inventoryLedger');
 const { lotChemistry } = require('./chemistry');
 const scorecard = require('./supplierScorecard');
 const purchaseRequests = require('./purchaseRequests');
@@ -150,24 +151,17 @@ router.post('/lots/:lotId/adjust', wrap((req) => {
 router.get('/movements', wrap((req) => store.listMovements(req.query.lotId).slice(0, Number(req.query.limit) || 200)));
 router.get('/additives', wrap(() => additives.inventory()));
 
-// Deduct additive stock when an RL strategy is accepted.
-// The gate computed the kg and lot already; this just records the movement.
-// Body: [{ lotId, kg, heatId, by, alloyName }]
+// Deduct additive stock atomically with idempotency and schema validation
 router.post('/additives/deduct', wrap((req) => {
-  const lines = req.body?.lines || [];
-  if (!lines.length) throw bad(400, 'lines is required');
-  const results = [];
-  lines.forEach((l) => {
-    const lot = store.getLot(l.lotId);
-    if (!lot) throw bad(404, `Lot ${l.lotId} not found`);
-    if (lot.materialType !== 'FERROALLOY') throw bad(400, `${l.lotId} is not a ferroalloy lot`);
-    const avail = store.availableKg(lot.lotId);
-    if (Number(l.kg) > avail) throw bad(409, `${l.lotId}: only ${avail} kg available, cannot deduct ${l.kg} kg`);
-    store.addMovement({ lotId: l.lotId, type: 'CHARGE', kg: -Number(l.kg), heatId: l.heatId || null, by: l.by || 'operator', note: `RL strategy accepted: ${l.alloyName || lot.alloyName}` });
-    results.push({ lotId: l.lotId, deductedKg: Number(l.kg), remainingKg: store.availableKg(lot.lotId) });
+  const idempotencyKey = req.headers['idempotency-key'] || req.body?.idempotencyKey;
+  const result = inventoryLedger.deductAdditivesAtomic({
+    lines: req.body?.lines,
+    heatId: req.body?.heatId,
+    idempotencyKey,
+    by: req.body?.by,
+    note: req.body?.note
   });
-  store.log('ADDITIVE_DEDUCTED', lines.map(l=>l.lotId).join(','), lines[0]?.by||'operator', `${lines.length} lot(s) deducted on RL strategy accept`);
-  return { deducted: results };
+  return result.data;
 }));
 
 // Receive a new ferroalloy batch (same flow as other lot types, surfaced separately for clarity)
@@ -273,7 +267,8 @@ router.put('/heats/:heatId/charge', wrap((req) => {
     if (!gate.specFor(req.body.grade)) throw bad(400, 'Unknown grade');
     h.grade = req.body.grade.toUpperCase();
   }
-  return { ...heatView(h), gateResult: h.gate };
+  store.heats.update(req.params.heatId, { charge: h.charge, targetKg: h.targetKg, grade: h.grade });
+  return { ...heatView(store.heats.get(req.params.heatId)), gateResult: h.gate };
 }));
 router.post('/heats/:heatId/gate-check', wrap((req) => gate.runGate(req.params.heatId, { by: req.body?.by })));
 router.post('/heats/:heatId/start-melting', wrap((req) => heatView(gate.startMelting(req.params.heatId, req.body || {}))));
@@ -296,6 +291,13 @@ router.patch('/config', wrap((req) => {
   return s;
 }));
 router.get('/audit', wrap((req) => store.audit().slice(0, Number(req.query.limit) || 100)));
-router.post('/demo/reset', wrap(() => { store.seed(); seedInspections(); return { reset: true }; }));
+router.post('/demo/reset', wrap(() => {
+  if (process.env.NODE_ENV === 'production' || process.env.ENABLE_DEMO_RESET !== 'true') {
+    throw bad(403, 'Demo reset is disabled in production or without ENABLE_DEMO_RESET=true');
+  }
+  store.seed(true);
+  seedInspections();
+  return { reset: true };
+}));
 
 module.exports = { router, gunService };

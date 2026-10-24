@@ -309,6 +309,7 @@ async function runGate(heatId, { by } = {}) {
   heat.gate = record;
   heat.gateHistory.unshift({ gateId: record.gateId, at: now, decision, by: record.by, blocking: blocking.length, warnings: warnings.length });
   store.log('GATE_CHECK', heatId, record.by, `${decision}${blocking.length ? `: ${blocking[0]}` : ''}`);
+  store.heats.update(heatId, { gate: record, gateHistory: heat.gateHistory });
   return record;
 }
 
@@ -316,7 +317,7 @@ async function runGate(heatId, { by } = {}) {
 function startMelting(heatId, { operator, acknowledgeWarnings, override } = {}) {
   const heat = store.heats.get(heatId);
   if (!heat) throw err(404, `Heat ${heatId} not found`);
-  if (heat.status !== 'PLANNED') throw err(409, `Heat ${heatId} is already ${heat.status}`);
+  if (heat.status !== 'PLANNED' && heat.status !== 'GATE_EVALUATED') throw err(409, `Heat ${heatId} is already ${heat.status}`);
   if (!operator) throw err(400, 'Operator name is required to start the furnace');
   const gate = heat.gate;
   if (!gate) throw err(428, 'Run the pre-melt check before starting the furnace');
@@ -357,7 +358,12 @@ function startMelting(heatId, { operator, acknowledgeWarnings, override } = {}) 
   };
   store.log(mode === 'ENGINEER_OVERRIDE' ? 'FURNACE_START_OVERRIDE' : 'FURNACE_START', heatId, operator,
     mode === 'ENGINEER_OVERRIDE' ? `HOLD overridden by ${override.engineer}: ${override.reason.trim()}` : `Started after ${gate.decision}`);
-  return heat;
+  store.heats.update(heatId, {
+    status: 'MELTING',
+    start: heat.start,
+    energyAtStart: heat.energyAtStart
+  });
+  return store.heats.get(heatId);
 }
 
 module.exports = { runGate, startMelting, specFor, fingerprint };
