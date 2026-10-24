@@ -302,7 +302,7 @@ function MethodsCard({ methods }) {
           </tr></thead>
           <tbody>
             {methods.map((m) => (
-              <tr key={m.materialType} className="border-b border-metal-100">
+              <tr key={m.materialLabel || m.materialType} className="border-b border-metal-100">
                 <td className="px-2 py-2 font-semibold text-metal-800">{m.materialLabel}</td>
                 <td className="px-2">{m.weightedTop}</td>
                 <td className="px-2">{m.topsisTop}</td>

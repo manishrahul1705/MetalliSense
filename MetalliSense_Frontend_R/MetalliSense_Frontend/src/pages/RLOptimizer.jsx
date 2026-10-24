@@ -207,6 +207,7 @@ const RLOptimizer = () => {
         return;
       }
       await rlSubmitFeedback({
+        heatId: flow?.heatId || undefined,
         grade: reading.metalGrade,
         composition: reading.composition,
         additions: candidate.recommended_additions,

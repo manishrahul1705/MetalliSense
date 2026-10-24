@@ -192,6 +192,60 @@ const Sidebar = ({ setRunTour }) => {
   const sidebarRef = useRef(null);
   const navigate = useNavigate();
 
+  const [systemStatus, setSystemStatus] = useState({
+    online: true,
+    label: import.meta.env.VITE_MOCK_MODE === 'true' ? 'Mock Mode Online' : 'All Systems Online',
+    subLabel: import.meta.env.VITE_MOCK_MODE === 'true' ? 'Deterministic In-Memory Engine' : 'OPC Connected • AI Ready'
+  });
+
+  useEffect(() => {
+    let active = true;
+    const checkSystemHealth = async () => {
+      if (import.meta.env.VITE_MOCK_MODE === 'true') {
+        if (active) {
+          setSystemStatus({
+            online: true,
+            label: 'Mock Mode Online',
+            subLabel: 'Deterministic In-Memory Engine'
+          });
+        }
+        return;
+      }
+      try {
+        const res = await fetch('/health', { method: 'GET' });
+        if (active) {
+          if (res.ok) {
+            setSystemStatus({
+              online: true,
+              label: 'All Systems Online',
+              subLabel: 'OPC Connected • Core Active'
+            });
+          } else {
+            setSystemStatus({
+              online: false,
+              label: 'Services Degraded',
+              subLabel: `HTTP Status ${res.status}`
+            });
+          }
+        }
+      } catch (_) {
+        if (active) {
+          setSystemStatus({
+            online: false,
+            label: 'System Offline',
+            subLabel: 'Backend Unreachable'
+          });
+        }
+      }
+    };
+    checkSystemHealth();
+    const timer = setInterval(checkSystemHealth, 30000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, []);
+
   const toggleSidebar = () => setIsOpen(!isOpen);
   const closeSidebar = () => setIsOpen(false);
 
@@ -362,15 +416,23 @@ const Sidebar = ({ setRunTour }) => {
 
           {/* System Status */}
           <div className="px-4 py-4 border-t border-metal-200">
-            <div className="bg-gradient-to-r from-emerald-50 to-green-50 border border-emerald-200 rounded-lg px-3 py-2 mb-4">
+            <div className={`border rounded-lg px-3 py-2 mb-4 ${
+              systemStatus.online
+                ? 'bg-gradient-to-r from-emerald-50 to-green-50 border-emerald-200'
+                : 'bg-gradient-to-r from-rose-50 to-red-50 border-rose-200'
+            }`}>
               <div className="flex items-center gap-2">
-                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                <span className="text-xs text-emerald-700 font-semibold">
-                  All Systems Online
+                <div className={`w-2 h-2 rounded-full ${
+                  systemStatus.online ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'
+                }`}></div>
+                <span className={`text-xs font-semibold ${
+                  systemStatus.online ? 'text-emerald-700' : 'text-rose-700'
+                }`}>
+                  {systemStatus.label}
                 </span>
               </div>
               <div className="text-xs text-metal-600 mt-1">
-                OPC Connected • AI Ready
+                {systemStatus.subLabel}
               </div>
             </div>
           </div>

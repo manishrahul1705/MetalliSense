@@ -4,6 +4,7 @@ import clsx from "clsx";
 const Input = ({
   label,
   error,
+  helpText,
   type = "text",
   className = "",
   containerClassName = "",
@@ -25,6 +26,7 @@ const Input = ({
         )}
         {...props}
       />
+      {helpText && !error && <p className="mt-1 text-xs text-metal-500">{helpText}</p>}
       {error && <p className="mt-1.5 text-sm text-red-600 font-medium">{error}</p>}
     </div>
   );

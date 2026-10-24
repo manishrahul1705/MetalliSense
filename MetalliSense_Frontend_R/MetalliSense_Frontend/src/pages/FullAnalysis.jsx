@@ -146,6 +146,7 @@ export default function FullAnalysis() {
         return;
       }
       await rlSubmitFeedback({
+        heatId: flow?.heatId || undefined,
         grade: reading.metalGrade,
         composition: reading.composition,
         additions: candidate.recommended_additions,
