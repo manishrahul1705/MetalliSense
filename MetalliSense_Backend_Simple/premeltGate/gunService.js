@@ -37,13 +37,21 @@ class GunService {
   async connect() {
     if (this.connected) return { success: true, message: 'Gun client already connected' };
     try {
-      this.client = OPCUAClient.create({
+      const clientOpts = {
         applicationName: 'MetalliSense Gun Client',
         connectionStrategy: { initialDelay: 500, maxRetry: 2 },
         securityMode: MessageSecurityMode.None,
         securityPolicy: SecurityPolicy.None,
         endpointMustExist: false,
-      });
+      };
+      if (process.env.OPCUA_PKI_DIR) {
+        const path = require('path');
+        const { OPCUACertificateManager } = require('node-opcua-certificate-manager');
+        clientOpts.clientCertificateManager = new OPCUACertificateManager({
+          rootFolder: path.join(process.env.OPCUA_PKI_DIR, 'client')
+        });
+      }
+      this.client = OPCUAClient.create(clientOpts);
       await this.client.connect(this.server.getStatus().endpoint);
       this.session = await this.client.createSession();
       this.connected = true;

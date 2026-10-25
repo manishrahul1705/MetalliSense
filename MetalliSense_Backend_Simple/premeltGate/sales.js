@@ -438,8 +438,9 @@ function createInvoice(body = {}, currentUser = null) {
     taxableRs: taxable,
     gstRs: gstAmount,
     totalRs: total,
+    total,
     issuedAt: nowIso,
-    createdBy: String(body.createdBy).trim(),
+    createdBy: creatorName,
     status: 'ACTIVE',
     lines: [{ description: `${gradeLabel(heat.tap.soldGrade)} Castings`, qtyKg, ratePerKg: rate, taxableRs: taxable }]
   };

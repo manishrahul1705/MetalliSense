@@ -17,6 +17,7 @@ const gradeStore = require('../gradeSpecStore');
 const additives = require('./additives');
 const energy = require('./energy');
 const { predictMeltdown, round } = require('./chemistry');
+const { transitionHeat, HEAT_STATES } = require('./heatStateMachine');
 const {
   GRADE_SPECS, RESIDUAL_LIMITS, ADDABLE_ELEMENTS, MAX_ONLY_ELEMENTS, TRAMP_ELEMENTS, settings,
 } = require('./config');
@@ -387,17 +388,21 @@ function startMelting(heatId, { operator, acknowledgeWarnings, override, expecte
   };
   store.log(mode === 'ENGINEER_OVERRIDE' ? 'FURNACE_START_OVERRIDE' : 'FURNACE_START', heatId, opName,
     mode === 'ENGINEER_OVERRIDE' ? `HOLD overridden by ${overrideEngineer}: ${override.reason.trim()}` : `Started after ${gate.decision}`);
-  store.heats.update(heatId, {
-    status: 'MELTING',
-    start: heat.start,
-    energyAtStart: heat.energyAtStart
+  const updatedHeat = transitionHeat(heatId, HEAT_STATES.MELTING, {
+    actor: opName,
+    expectedVersion: expVer,
+    note: mode === 'ENGINEER_OVERRIDE' ? ('HOLD overridden by ' + overrideEngineer + ': ' + override.reason.trim()) : ('Started after ' + gate.decision),
+    extraUpdates: {
+      start_json: JSON.stringify(heat.start),
+      energy_at_start_json: heat.energyAtStart ? JSON.stringify(heat.energyAtStart) : null
+    }
   });
   if (mode === 'ENGINEER_OVERRIDE' && currentUser) {
     try {
       require('./security').recordMakerCheckerReview({
         entityType: 'FURNACE_HOLD_OVERRIDE',
         entityId: heatId,
-        entityVersion: heat.version,
+        entityVersion: updatedHeat.version,
         makerId: heat.plannedBy || 'LEGACY',
         checkerId: currentUser.userId,
         decision: 'OVERRIDE_APPROVED',

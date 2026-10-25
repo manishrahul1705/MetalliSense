@@ -35,6 +35,7 @@ describe('gate parity and interlocks',()=>{
   const nodeRequire=createRequire(new URL('../../../MetalliSense_Backend_Simple/server.js',import.meta.url));
   const nodeStore=nodeRequire('./premeltGate/store'),nodeGate=nodeRequire('./premeltGate/gateEngine'),nodeAxios=nodeRequire('axios');
   const original=nodeAxios.post;nodeAxios.post=async(u,b)=>{const r=await dispatch('POST','http://local/premelt/assess',b);return {data:r.data};};
+  nodeStore.seed();
   try{for(const charge of [[],[{lotId:'PIG-0901',kg:1000}],[{lotId:'PIG-0901',kg:400},{lotId:'RET-1043',kg:600}]]){
    const data={grade,targetKg:1000,charge,status:'PLANNED',gate:null,gateHistory:[]};const a=nodeStore.heats.add(structuredClone(data)),b=requirePort('premeltGate/store').heats.add(structuredClone(data));
    const real=await nodeGate.runGate(a.heatId),mock=await requirePort('premeltGate/gateEngine').runGate(b.heatId);

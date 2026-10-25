@@ -23,6 +23,7 @@
 const fs = require('fs');
 const path = require('path');
 const { OPCUAServer, Variant, DataType, StatusCodes } = require('node-opcua');
+const { OPCUACertificateManager } = require('node-opcua-certificate-manager');
 const store = require('./store');
 const { simulateSession, toCsv } = require('./gunSimulator');
 const { settings } = require('./config');
@@ -45,11 +46,17 @@ class HandheldGunOPCUAServer {
 
   async initialize() {
     try {
-      this.server = new OPCUAServer({
+      const serverOpts = {
         port: PORT,
         resourcePath: '/MetalliSense/HandheldGun',
         buildInfo: { productName: 'MetalliSense Handheld XRF/LIBS Simulator', buildNumber: '1.0.0', buildDate: new Date() },
-      });
+      };
+      if (process.env.OPCUA_PKI_DIR) {
+        serverOpts.serverCertificateManager = new OPCUACertificateManager({
+          rootFolder: path.join(process.env.OPCUA_PKI_DIR, 'server')
+        });
+      }
+      this.server = new OPCUAServer(serverOpts);
       await this.server.initialize();
       this.createVariables();
       return true;
