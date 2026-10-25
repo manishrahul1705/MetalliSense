@@ -166,7 +166,14 @@ function addLot(data, by) {
       txDb.prepare('INSERT INTO counters (key, val) VALUES (?, ?)').run(counterKey, nextCounter);
     }
 
-    const lotId = data.lotId || `${type.prefix}-${String(nextCounter).padStart(4, '0')}`;
+    let lotId = data.lotId || `${type.prefix}-${String(nextCounter).padStart(4, '0')}`;
+    if (!data.lotId) {
+      while (txDb.prepare('SELECT lot_id FROM lots WHERE lot_id = ?').get(lotId)) {
+        nextCounter += 1;
+        lotId = `${type.prefix}-${String(nextCounter).padStart(4, '0')}`;
+        txDb.prepare('UPDATE counters SET val = ? WHERE key = ?').run(nextCounter, counterKey);
+      }
+    }
     const grnNo = data.grnNo || nextId('grn', 'GRN', 5);
     const nowIso = (data.receivedAt instanceof Date ? data.receivedAt : new Date(data.receivedAt || Date.now())).toISOString();
     const receivedKg = Number(data.receivedKg);

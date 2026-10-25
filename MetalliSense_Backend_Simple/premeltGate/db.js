@@ -45,6 +45,9 @@ function initDb(dbPath = null) {
   currentDb.exec('PRAGMA synchronous = NORMAL;');
 
   runMigrations(currentDb);
+  if (canBootstrapDevAccounts()) {
+    bootstrapDevAccounts(currentDb);
+  }
   return currentDb;
 }
 
@@ -363,45 +366,92 @@ const MIGRATIONS = [
       try { db.exec('ALTER TABLE evidence ADD COLUMN sample_id TEXT;'); } catch (_) {}
       try { db.exec('ALTER TABLE evidence ADD COLUMN payload_hash TEXT;'); } catch (_) {}
       try { db.exec('ALTER TABLE evidence ADD COLUMN ingested_by_service TEXT;'); } catch (_) {}
-
-      // Seed initial development/test users and service credentials (only in non-production or when explicitly requested)
-      const shouldSeed = process.env.NODE_ENV !== 'production' || process.env.SEED_DEV_ACCOUNTS === 'true';
-      if (shouldSeed) {
-        const crypto = require('crypto');
-        function quickScrypt(pw) {
-          const salt = crypto.randomBytes(16).toString('hex');
-          const derived = crypto.scryptSync(pw, salt, 32, { N: 16384, r: 8, p: 1 }).toString('hex');
-          return 'scrypt$16384$8$1$' + salt + '$' + derived;
-        }
-
-        const now = new Date().toISOString();
-        const insertUser = db.prepare(`
-          INSERT OR IGNORE INTO users (user_id, username, email, display_name, password_hash, roles, is_enabled, credential_version, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, ?)
-        `);
-
-        insertUser.run('USR-OP-01', 'operator1', 'operator1@example.com', 'Rajesh Operator', quickScrypt('OperatorPass123!'), JSON.stringify(['OPERATOR']), now, now);
-        insertUser.run('USR-MET-01', 'metallurgist1', 'metallurgist1@example.com', 'Dr. Aris Metallurgist', quickScrypt('MetallurgyPass123!'), JSON.stringify(['METALLURGIST']), now, now);
-        insertUser.run('USR-QM-01', 'qm1', 'qm1@example.com', 'Priya Quality Mgr', quickScrypt('QualityPass123!'), JSON.stringify(['QUALITY_MANAGER']), now, now);
-        insertUser.run('USR-INV-01', 'inventory1', 'inventory1@example.com', 'Suresh Stores', quickScrypt('InventoryPass123!'), JSON.stringify(['INVENTORY_CONTROLLER']), now, now);
-        insertUser.run('USR-FIN-01', 'finance1', 'finance1@example.com', 'Anand Finance', quickScrypt('FinancePass123!'), JSON.stringify(['SALES_FINANCE']), now, now);
-        insertUser.run('USR-ADM-01', 'admin1', 'admin1@example.com', 'Systems Administrator', quickScrypt('AdminSecurePass123!'), JSON.stringify(['ADMIN']), now, now);
-
-        // Seed service credentials
-        const insertSvc = db.prepare(`
-          INSERT OR IGNORE INTO service_credentials (service_id, service_name, service_type, api_key_hash, allowed_sources, permitted_evidence, is_enabled, credential_version, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?)
-        `);
-
-        const spectroHash = crypto.createHash('sha256').update('spectro-dev-token-secret-2026').digest('hex');
-        insertSvc.run('SVC-SPECTRO-01', 'Optical Emission Spectrometer', 'SPECTROMETER_SERVICE', spectroHash, JSON.stringify(['OES-01', 'OES-02', 'SPECTRO-LAB']), JSON.stringify(['MELT_MEASURED', 'POST_CORRECTION_MEASURED']), now);
-
-        const labHash = crypto.createHash('sha256').update('lab-dev-token-secret-2026').digest('hex');
-        insertSvc.run('SVC-LAB-01', 'Physical Testing Laboratory', 'LAB_SERVICE', labHash, JSON.stringify(['UTM-01', 'IMPACT-01', 'HARDNESS-01']), JSON.stringify(['LAB_MEASURED']), now);
-      }
     }
   }
 ];
+
+function canBootstrapDevAccounts() {
+  const env = (process.env.NODE_ENV || '').trim();
+  const isProd = env === 'production';
+  const isDevOrTest = env === 'development' || env === 'test';
+  const isExplicitBootstrap = process.env.SEED_DEV_ACCOUNTS === 'true' || process.env.ALLOW_DEV_BOOTSTRAP === 'true';
+
+  // SEC-FINDING-001 Policy Enforcement:
+  // 1. Prohibit development-account seeding in production under all circumstances, even when flag is true
+  if (isProd) return false;
+  // 2. No automatic account seeding when NODE_ENV is unset
+  if (!env) return false;
+  // 3. Require explicit development/test bootstrap
+  return isDevOrTest && isExplicitBootstrap;
+}
+
+function bootstrapDevAccounts(targetDb = null, credentials = {}) {
+  const db = targetDb || getDb();
+  if (!canBootstrapDevAccounts() && !credentials.forceBootstrap) {
+    return { seeded: false, reason: 'BOOTSTRAP_DISALLOWED' };
+  }
+
+  const existingUsers = db.prepare('SELECT count(*) as c FROM users').get();
+  if (existingUsers && existingUsers.c > 0) {
+    return { seeded: false, reason: 'USERS_ALREADY_EXIST' };
+  }
+
+  const crypto = require('crypto');
+  function quickScrypt(pw) {
+    const salt = crypto.randomBytes(16).toString('hex');
+    const derived = crypto.scryptSync(pw, salt, 32, { N: 16384, r: 8, p: 1 }).toString('hex');
+    return 'scrypt$16384$8$1$' + salt + '$' + derived;
+  }
+
+  // Isolated test provisioning without committed working credentials
+  const isTest = process.env.NODE_ENV === 'test';
+  const creds = {
+    operator: credentials.operatorPassword || process.env.DEV_OPERATOR_PASSWORD || (isTest ? 'OperatorPass123!' : null),
+    metallurgist: credentials.metallurgistPassword || process.env.DEV_METALLURGIST_PASSWORD || (isTest ? 'MetallurgyPass123!' : null),
+    qm: credentials.qmPassword || process.env.DEV_QM_PASSWORD || (isTest ? 'QualityPass123!' : null),
+    inventory: credentials.inventoryPassword || process.env.DEV_INVENTORY_PASSWORD || (isTest ? 'InventoryPass123!' : null),
+    finance: credentials.financePassword || process.env.DEV_FINANCE_PASSWORD || (isTest ? 'FinancePass123!' : null),
+    admin: credentials.adminPassword || process.env.DEV_ADMIN_PASSWORD || (isTest ? 'AdminSecurePass123!' : null),
+    spectroToken: credentials.spectroToken || process.env.DEV_SPECTRO_TOKEN || (isTest ? 'spectro-dev-token-secret-2026' : null),
+    labToken: credentials.labToken || process.env.DEV_LAB_TOKEN || (isTest ? 'lab-dev-token-secret-2026' : null),
+  };
+
+  // If in dev and no password provided via env, generate cryptographically secure ephemeral passwords
+  Object.keys(creds).forEach((k) => {
+    if (!creds[k]) {
+      creds[k] = crypto.randomBytes(16).toString('base64url') + '!1Aa';
+    }
+  });
+
+  const now = new Date().toISOString();
+  withTransaction((txDb) => {
+    const insertUser = txDb.prepare(`
+      INSERT OR IGNORE INTO users (user_id, username, email, display_name, password_hash, roles, is_enabled, credential_version, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, ?)
+    `);
+
+    insertUser.run('USR-OP-01', 'operator1', 'operator1@example.com', 'Rajesh Operator', quickScrypt(creds.operator), JSON.stringify(['OPERATOR']), now, now);
+    insertUser.run('USR-MET-01', 'metallurgist1', 'metallurgist1@example.com', 'Dr. Aris Metallurgist', quickScrypt(creds.metallurgist), JSON.stringify(['METALLURGIST']), now, now);
+    insertUser.run('USR-QM-01', 'qm1', 'qm1@example.com', 'Priya Quality Mgr', quickScrypt(creds.qm), JSON.stringify(['QUALITY_MANAGER']), now, now);
+    insertUser.run('USR-INV-01', 'inventory1', 'inventory1@example.com', 'Suresh Stores', quickScrypt(creds.inventory), JSON.stringify(['INVENTORY_CONTROLLER']), now, now);
+    insertUser.run('USR-FIN-01', 'finance1', 'finance1@example.com', 'Anand Finance', quickScrypt(creds.finance), JSON.stringify(['SALES_FINANCE']), now, now);
+    insertUser.run('USR-ADM-01', 'admin1', 'admin1@example.com', 'Systems Administrator', quickScrypt(creds.admin), JSON.stringify(['ADMIN']), now, now);
+
+    // Seed service credentials
+    const insertSvc = txDb.prepare(`
+      INSERT OR IGNORE INTO service_credentials (service_id, service_name, service_type, api_key_hash, allowed_sources, permitted_evidence, is_enabled, credential_version, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?)
+    `);
+
+    const spectroHash = crypto.createHash('sha256').update(creds.spectroToken).digest('hex');
+    insertSvc.run('SVC-SPECTRO-01', 'Optical Emission Spectrometer', 'SPECTROMETER_SERVICE', spectroHash, JSON.stringify(['OES-01', 'OES-02', 'SPECTRO-LAB']), JSON.stringify(['MELT_MEASURED', 'POST_CORRECTION_MEASURED']), now);
+
+    const labHash = crypto.createHash('sha256').update(creds.labToken).digest('hex');
+    insertSvc.run('SVC-LAB-01', 'Physical Testing Laboratory', 'LAB_SERVICE', labHash, JSON.stringify(['UTM-01', 'IMPACT-01', 'HARDNESS-01']), JSON.stringify(['LAB_MEASURED']), now);
+  }, db);
+
+  return { seeded: true, usersSeeded: 6, servicesSeeded: 2 };
+}
 
 function runMigrations(targetDb = null) {
   const db = targetDb || getDb();
@@ -450,5 +500,7 @@ module.exports = {
   closeDb,
   withTransaction,
   runMigrations,
-  getDefaultDbPath
+  getDefaultDbPath,
+  canBootstrapDevAccounts,
+  bootstrapDevAccounts
 };

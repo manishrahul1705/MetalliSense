@@ -20,6 +20,7 @@ const purchaseRequests = require('./purchaseRequests');
 const { getDb } = require('./db');
 const sec = require('./security');
 const { requireAuth, requireHuman, requireRole } = require('./authMiddleware');
+const { evaluateCorrectionFeasibility, computeCandidateHash } = require('./correctionFeasibility');
 
 const router = express.Router();
 
@@ -174,6 +175,118 @@ router.post('/additives/deduct', requireAuth, requireRole('OPERATOR', 'METALLURG
     note: req.body?.note
   });
   return result.data;
+}));
+
+// ================================================================ Correction Feasibility & Approval
+router.post('/corrections/evaluate', requireAuth, wrap((req) => {
+  const { heatId, additions, targetGrade } = req.body || {};
+  if (!heatId) throw bad(400, 'heatId is required');
+  const heat = store.heats.get(heatId);
+  if (!heat) throw bad(404, `Heat ${heatId} not found`);
+
+  const db = getDb();
+  const latestEv = db.prepare(`
+    SELECT * FROM evidence 
+    WHERE heat_id = ? AND evidence_type IN ('MELT_MEASURED', 'POST_CORRECTION_MEASURED')
+    ORDER BY rowid DESC LIMIT 1
+  `).get(heatId);
+
+  const initialChem = latestEv ? JSON.parse(latestEv.values_json) : (heat.meltdown_chemistry || {});
+  const grade = targetGrade || heat.grade;
+  const heatMass = heat.targetKg || 1000;
+
+  return evaluateCorrectionFeasibility({
+    heatMassKg: heatMass,
+    initialChemistry: initialChem,
+    additions: additions || [],
+    targetGrade: grade
+  });
+}));
+
+router.post('/corrections/approve', requireAuth, requireRole('METALLURGIST', 'QUALITY_MANAGER', 'ADMIN'), wrap((req) => {
+  const { heatId, candidateId, candidateHash, expectedHeatVersion, evidenceVersion, specVersion, additions } = req.body || {};
+  if (!heatId) throw bad(400, 'heatId is required');
+  if (!candidateId || !candidateHash) throw bad(400, 'candidateId and candidateHash are required');
+  if (expectedHeatVersion === undefined || expectedHeatVersion === null) throw bad(400, 'expectedHeatVersion is required');
+
+  const db = getDb();
+  const heat = db.prepare('SELECT * FROM heats WHERE heat_id = ?').get(heatId);
+  if (!heat) throw bad(404, `Heat ${heatId} not found`);
+
+  // 1. Verify heat version has not advanced (Reject stale approvals)
+  if (Number(expectedHeatVersion) !== Number(heat.version)) {
+    throw bad(409, `STALE_APPROVAL: Heat version advanced from v${expectedHeatVersion} to v${heat.version}. Re-evaluation required.`, {
+      code: 'STALE_APPROVAL_HEAT_VERSION',
+      currentVersion: heat.version,
+      expectedVersion: expectedHeatVersion
+    });
+  }
+
+  // 2. Verify chemistry evidence version matches (Reject if new evidence arrived)
+  const latestEv = db.prepare(`
+    SELECT * FROM evidence 
+    WHERE heat_id = ? AND evidence_type IN ('MELT_MEASURED', 'POST_CORRECTION_MEASURED')
+    ORDER BY rowid DESC LIMIT 1
+  `).get(heatId);
+
+  if (evidenceVersion && latestEv && latestEv.sample_id !== evidenceVersion) {
+    throw bad(409, `STALE_APPROVAL: Newer chemistry evidence (${latestEv.sample_id}) exists for heat ${heatId} than candidate evidence (${evidenceVersion}). Re-evaluation required.`, {
+      code: 'STALE_APPROVAL_EVIDENCE',
+      currentEvidence: latestEv.sample_id,
+      expectedEvidence: evidenceVersion
+    });
+  }
+
+  // 3. Verify specification version
+  if (specVersion && specVersion !== '1.0') {
+    throw bad(409, `STALE_APPROVAL: Specification version mismatch (${specVersion} vs 1.0).`, {
+      code: 'STALE_APPROVAL_SPEC'
+    });
+  }
+
+  // 4. Verify candidate hash integrity (Reject changed candidates)
+  if (additions && Array.isArray(additions)) {
+    const computedHash = computeCandidateHash(additions, heat.grade, specVersion || '1.0');
+    if (computedHash !== candidateHash) {
+      throw bad(409, `APPROVAL_REJECTED: Candidate additions payload changed from approved hash (${candidateHash.slice(0, 8)} vs ${computedHash.slice(0, 8)}).`, {
+        code: 'CHANGED_CANDIDATE_PAYLOAD'
+      });
+    }
+  }
+
+  // 5. Maker-checker separation: approver cannot be the heat planner
+  const approverId = req.user ? (req.user.userId || req.user.username) : 'UNKNOWN';
+  if (heat.planned_by && heat.planned_by === approverId) {
+    throw bad(403, 'Maker-checker violation: Heat planner cannot approve their own alloy correction candidate', {
+      code: 'MAKER_CHECKER_VIOLATION'
+    });
+  }
+
+  // 6. Record maker-checker approval review bound to exact versions
+  const reviewId = sec.recordMakerCheckerReview({
+    entityType: 'ALLOY_CORRECTION',
+    entityId: heatId,
+    entityVersion: expectedHeatVersion,
+    makerId: heat.planned_by || 'SYSTEM',
+    checkerId: approverId,
+    decision: 'APPROVED',
+    reason: `Approved candidate ${candidateId} (hash ${candidateHash.slice(0, 8)}) for heat ${heatId} v${expectedHeatVersion} with evidence ${evidenceVersion || 'NONE'}`
+  });
+
+  return {
+    approvalId: reviewId,
+    status: 'APPROVED',
+    heatId,
+    candidateId,
+    candidateHash,
+    boundVersions: {
+      heatVersion: expectedHeatVersion,
+      evidenceVersion: evidenceVersion || latestEv?.sample_id || null,
+      specVersion: specVersion || '1.0'
+    },
+    approvedBy: approverId,
+    approvedAt: new Date().toISOString()
+  };
 }));
 
 // Receive a new ferroalloy batch
