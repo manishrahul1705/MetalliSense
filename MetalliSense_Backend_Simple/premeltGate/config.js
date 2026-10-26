@@ -89,7 +89,7 @@ const settings = {
   aiMinConfidence: 0.5,
   // No AI answer -> HOLD (fail-safe). Set false to downgrade to WARN.
   aiRequired: process.env.PREMELT_AI_REQUIRED !== undefined ? process.env.PREMELT_AI_REQUIRED === 'true' : true,
-  aiTimeoutMs: 20000,
+  aiTimeoutMs: process.env.AI_TIMEOUT_MS ? Number(process.env.AI_TIMEOUT_MS) : 3000,
   // DRI
   driMaxAgeDays: 7,
   driRules: {

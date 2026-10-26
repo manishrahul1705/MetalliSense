@@ -14,7 +14,7 @@
  * 9. Backend OS-level process kill and restart with same SQLite file: verification of persistence
  */
 import { chromium } from '@playwright/test';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
@@ -192,23 +192,25 @@ async function run() {
     // Step 3: Heat Planning & Pre-Melt Gate via UI
     await loginAs('operator1', 'OperatorPass123!');
     await page.goto(`${FRONTEND_URL}/premelt-gate`);
-    await page.waitForTimeout(1000);
+    await page.waitForSelector('button:has-text("H-1051")', { timeout: 15000 });
 
     // Explicitly select H-1051
     const h1051Btn = page.locator('button', { hasText: 'H-1051' }).first();
-        if (await h1051Btn.isVisible().catch(() => false)) {
-      await h1051Btn.click();
-      await page.waitForTimeout(600);
-    }
+    await h1051Btn.click();
+    await page.waitForTimeout(600);
 
     const checkBtn = page.getByRole('button', { name: /Run pre-melt check/i });
-        if (await checkBtn.isVisible().catch(() => false)) {
-      await checkBtn.click();
-      await page.waitForTimeout(1500);
-    }
+    await checkBtn.waitFor({ state: 'visible', timeout: 15000 });
+    console.log('Triggering pre-melt check for H-1051 via UI...');
+    await Promise.all([
+      page.waitForResponse(r => r.url().includes('/gate-check'), { timeout: 15000 }),
+      checkBtn.click()
+    ]);
+    console.log('Pre-melt gate check completed.');
+    await page.waitForTimeout(800);
 
     const opInput = page.locator('input[placeholder="Name"]');
-        if (await opInput.isVisible().catch(() => false)) {
+    if (await opInput.isVisible().catch(() => false)) {
       await opInput.fill('operator1');
       await page.waitForTimeout(200);
     }
@@ -223,38 +225,61 @@ async function run() {
     const startMeltBtn = page.getByRole('button', { name: /Start melting/i }).first();
     const isStartVisible = await startMeltBtn.isVisible().catch(() => false);
     const isStartEnabled = isStartVisible && await startMeltBtn.isEnabled().catch(() => false);
-            if (isStartEnabled) {
-      await startMeltBtn.click();
-      await page.waitForTimeout(1200);
+    if (isStartEnabled) {
+      console.log('Gate passed/warned; starting melting directly...');
+      await Promise.all([
+        page.waitForResponse(r => r.url().includes('/start-melting') && r.status() === 200, { timeout: 15000 }),
+        startMeltBtn.click()
+      ]);
+      await page.waitForTimeout(1000);
       meltingStarted = true;
     } else {
-      // Gate is on HOLD: switch to Metallurgist to perform authorized Engineer Override
+      // Pre-Melt Gate is locked on HOLD (fail-safe). Authenticate as Metallurgist to perform authorized Engineer Override
+      console.log('Pre-Melt Gate is locked on HOLD (fail-safe). Switching to metallurgist1 for authorized Engineer Override...');
       await loginAs('metallurgist1', 'MetallurgyPass123!');
       await page.goto(`${FRONTEND_URL}/premelt-gate`);
+      await page.waitForSelector('button:has-text("H-1051")', { timeout: 15000 });
+      const hBtn = page.locator('button', { hasText: 'H-1051' }).first();
+      await hBtn.click();
       await page.waitForTimeout(600);
+
+      const overrideLink = page.getByRole('button', { name: /Engineer override/i }).first();
+      await overrideLink.waitFor({ state: 'visible', timeout: 10000 });
+      console.log('Opening Engineer override form...');
+      await overrideLink.click();
+      await page.waitForTimeout(400);
+
       const opInput2 = page.locator('input[placeholder="Name"]');
-      if (await opInput2.isVisible().catch(() => false)) {
-        await opInput2.fill('operator1');
-        await page.waitForTimeout(200);
-      }
-      const overrideLink = page.getByRole('button', { name: /Engineer override/i });
-      if (await overrideLink.isVisible().catch(() => false)) {
-        await overrideLink.click();
-        await page.waitForTimeout(300);
-        await page.locator('input[placeholder="Engineer name"]').fill('metallurgist1');
-        await page.locator('input[placeholder*="Reason"]').fill('Supervised metallurgical trial with controlled fluxing additions.');
-        const overrideBtn = page.getByRole('button', { name: /Override and start melting/i });
-        if (await overrideBtn.isVisible().catch(() => false) && await overrideBtn.isEnabled().catch(() => false)) {
-          await overrideBtn.click();
-          await page.waitForTimeout(1200);
-          meltingStarted = true;
-        }
-      }
+      await opInput2.waitFor({ state: 'visible', timeout: 5000 });
+      await opInput2.fill('operator1');
+
+      const engInput = page.locator('input[placeholder="Engineer name"]');
+      await engInput.waitFor({ state: 'visible', timeout: 5000 });
+      await engInput.fill('metallurgist1');
+
+      const reasonInput = page.locator('input[placeholder*="Reason"]');
+      await reasonInput.waitFor({ state: 'visible', timeout: 5000 });
+      await reasonInput.fill('Supervised metallurgical trial with controlled fluxing additions.');
+      await page.waitForTimeout(300);
+
+      const overrideBtn = page.getByRole('button', { name: /Override and start melting/i });
+      await overrideBtn.waitFor({ state: 'visible', timeout: 5000 });
+      console.log('Submitting authorized Engineer Override via UI...');
+      await Promise.all([
+        page.waitForResponse(r => r.url().includes('/start-melting') && r.status() === 200, { timeout: 15000 }),
+        overrideBtn.click()
+      ]);
+      await page.waitForTimeout(1000);
+      meltingStarted = true;
     }
     const checkHeatRes = await fetch(`${BACKEND_URL}/api/v2/premelt/heats/H-1051`);
     const checkHeatJson = await checkHeatRes.json();
-        meltingStarted = checkHeatJson.data?.status === 'MELTING';
+    meltingStarted = checkHeatJson.data?.status === 'MELTING';
     recordStep('Step 3: Pre-Melt Gate evaluated and Furnace Start triggered via UI', meltingStarted, { meltingStarted, heatStatus: checkHeatJson.data?.status });
+
+    if (!meltingStarted) {
+      throw new Error(`CRITICAL LIFECYCLE PREREQUISITE FAILED: Heat H-1051 did not transition to MELTING (status is ${checkHeatJson.data?.status}). Aborting dependent steps.`);
+    }
 
     // Step 4: Spectrometer Reading Ingestion (Trusted Service API as required by prompt)
     // "Keep trusted instrument/lab ingestion on service APIs."
@@ -373,11 +398,14 @@ async function run() {
     let approvedUiSuccess = false;
 
     if (canReviewApprove) {
-      await reviewApproveBtn.click();
+      await Promise.all([
+        page.waitForResponse(r => r.url().includes('/corrections/reviews') && r.status() === 200, { timeout: 10000 }).catch(() => null),
+        reviewApproveBtn.click()
+      ]);
       await page.waitForTimeout(800);
       approvedUiSuccess = await page.getByText(/Approved by Metallurgist/i).count() > 0;
     }
-    recordStep('Step 5: Metallurgist clicked Review & Approve Correction UI control', canReviewApprove || approvedUiSuccess, { canReviewApprove, approvedUiSuccess });
+    recordStep('Step 5: Metallurgist clicked Review & Approve Correction UI control', canReviewApprove && approvedUiSuccess, { canReviewApprove, approvedUiSuccess });
 
     // Step 6: Operator Deduction of Approved Candidate via UI
     await loginAs('operator1', 'OperatorPass123!');
@@ -388,11 +416,16 @@ async function run() {
     const canDeduct = await deductBtn.isVisible({ timeout: 5000 }).catch(() => false);
     let deductionRecorded = false;
     if (canDeduct) {
-      await deductBtn.click();
+      await Promise.all([
+        page.waitForResponse(r => r.url().includes('/inventory/deduct') && r.status() === 200, { timeout: 10000 }).catch(() => null),
+        deductBtn.click()
+      ]);
       await page.waitForTimeout(800);
-      deductionRecorded = true;
+      const checkDedRes = await fetch(`${BACKEND_URL}/api/v2/premelt/heats/H-1051`);
+      const checkDedJson = await checkDedRes.json();
+      deductionRecorded = checkDedJson.data?.status === 'CORRECTION' || (checkDedJson.data?.charge && checkDedJson.data.charge.length > 0);
     }
-    recordStep('Step 6: Operator clicked Accept & Deduct Stock UI control', canDeduct, { deductionRecorded });
+    recordStep('Step 6: Operator clicked Accept & Deduct Stock UI control', canDeduct && deductionRecorded, { canDeduct, deductionRecorded });
 
     // Step 7: Mechanical Properties & Tap Approval via UI
     await loginAs('qm1', 'QualityPass123!');
@@ -409,13 +442,20 @@ async function run() {
     const canApproveTap = await approveTapBtn.isVisible().catch(() => false);
     let tapApproved = false;
     if (canApproveTap && await approveTapBtn.isEnabled().catch(() => false)) {
-      await approveTapBtn.click();
+      await Promise.all([
+        page.waitForResponse(r => r.url().includes('/sales/heats') || r.url().includes('/properties'), { timeout: 10000 }).catch(() => null),
+        approveTapBtn.click()
+      ]);
       await page.waitForTimeout(1000);
-      tapApproved = true;
+      const checkTapRes = await fetch(`${BACKEND_URL}/api/v2/premelt/heats/H-1051`);
+      const checkTapJson = await checkTapRes.json();
+      tapApproved = checkTapJson.data?.status === 'COMPLETED' || checkTapJson.data?.status === 'RELEASED';
     } else {
-      tapApproved = await page.getByText(/Tap Approved|Heat H-1051 Released/i).count() > 0;
+      const checkTapRes = await fetch(`${BACKEND_URL}/api/v2/premelt/heats/H-1051`);
+      const checkTapJson = await checkTapRes.json();
+      tapApproved = checkTapJson.data?.status === 'COMPLETED' || checkTapJson.data?.status === 'RELEASED';
     }
-    recordStep('Step 7: Quality Manager completed heat & approved tap via UI', canApproveTap || tapApproved, { canApproveTap, tapApproved });
+    recordStep('Step 7: Quality Manager completed heat & approved tap via UI', tapApproved, { canApproveTap, tapApproved });
 
     // Step 8: Sales & Invoicing via UI
     await loginAs('finance1', 'FinancePass123!');
@@ -447,7 +487,7 @@ async function run() {
     console.log(`Killing active backend OS process (PID ${oldPid})...`);
 
     if (process.platform === 'win32') {
-      spawn('taskkill', ['/pid', String(oldPid), '/f', '/t'], { stdio: 'ignore' });
+      spawnSync('taskkill', ['/pid', String(oldPid), '/f', '/t'], { stdio: 'ignore' });
     } else {
       backendProc.kill('SIGKILL');
     }
@@ -484,14 +524,14 @@ async function run() {
     try {
       if (frontendProc) {
         if (process.platform === 'win32') {
-          spawn('taskkill', ['/pid', String(frontendProc.pid), '/f', '/t'], { stdio: 'ignore' });
+          spawnSync('taskkill', ['/pid', String(frontendProc.pid), '/f', '/t'], { stdio: 'ignore' });
         } else {
           frontendProc.kill('SIGKILL');
         }
       }
       if (backendProc) {
         if (process.platform === 'win32') {
-          spawn('taskkill', ['/pid', String(backendProc.pid), '/f', '/t'], { stdio: 'ignore' });
+          spawnSync('taskkill', ['/pid', String(backendProc.pid), '/f', '/t'], { stdio: 'ignore' });
         } else {
           backendProc.kill('SIGKILL');
         }
