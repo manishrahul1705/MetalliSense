@@ -209,7 +209,7 @@ async function run() {
 
     // 5. Role-Aware Semantic Structure Check
     await gotoRoute('premelt-gate');
-    await page.waitForSelector('h1, h2, button', { timeout: 10000 });
+    await page.waitForSelector('h1', { state: 'visible', timeout: 10000 });
     await page.waitForTimeout(300);
     const semanticCounts = await page.evaluate(() => {
       return {
