@@ -203,4 +203,4 @@ def semantic_search(req: SearchRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8002, reload=True)
+    uvicorn.run("main:app", host=os.getenv("HOST", "127.0.0.1"), port=8002, reload=True)

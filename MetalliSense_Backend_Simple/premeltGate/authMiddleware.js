@@ -251,12 +251,31 @@ function csrfProtection(req, res, next) {
   next();
 }
 
+/**
+ * Restricts sensitive simulation, reset, or diagnostic routes to explicit development/test environments.
+ * Permanently rejects requests in production with 403.
+ */
+function requireDevOrTest(featureName = 'This feature') {
+  return (req, res, next) => {
+    const env = (process.env.NODE_ENV || '').trim().toLowerCase();
+    if (env === 'production' || (env !== 'development' && env !== 'test')) {
+      return res.status(403).json({
+        status: 'fail',
+        code: 'FEATURE_DISABLED_IN_ENVIRONMENT',
+        message: `${featureName} is permanently disabled in production and staging environments.`
+      });
+    }
+    next();
+  };
+}
+
 module.exports = {
   authenticate,
   requireAuth,
   requireHuman,
   requireService,
   requireRole,
+  requireDevOrTest,
   csrfProtection,
   parseCookies
 };

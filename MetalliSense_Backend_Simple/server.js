@@ -18,7 +18,7 @@ const sellingPriceStore = require('./sellingPriceStore');
 const mechanicalRoutes = require('./mechanicalRoutes');
 
 const app = express();
-const { authenticate, csrfProtection, requireAuth, requireRole } = require('./premeltGate/authMiddleware');
+const { authenticate, csrfProtection, requireAuth, requireRole, requireDevOrTest } = require('./premeltGate/authMiddleware');
 const authRoutes = require('./premeltGate/authRoutes');
 
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
@@ -322,7 +322,7 @@ opcRouter.get('/opc-status', (req, res) => {
   res.json({ status: 'success', data: opcuaService.getOPCStatus() });
 });
 
-opcRouter.post('/opc-connect', async (req, res) => {
+opcRouter.post('/opc-connect', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'ADMIN'), async (req, res) => {
   const result = await opcuaService.connectClient();
   res.status(result.success ? 200 : 500).json({
     status: result.success ? 'success' : 'error',
@@ -331,7 +331,7 @@ opcRouter.post('/opc-connect', async (req, res) => {
   });
 });
 
-opcRouter.post('/opc-disconnect', async (req, res) => {
+opcRouter.post('/opc-disconnect', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'ADMIN'), async (req, res) => {
   const result = await opcuaService.disconnectClient();
   res.status(result.success ? 200 : 500).json({
     status: result.success ? 'success' : 'error',
@@ -340,7 +340,7 @@ opcRouter.post('/opc-disconnect', async (req, res) => {
   });
 });
 
-opcRouter.post('/opc-reading', async (req, res) => {
+opcRouter.post('/opc-reading', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'ADMIN'), async (req, res) => {
   const { metalGrade, deviationElements = [], deviationPercentage = 10 } = req.body;
   if (!metalGrade) return res.status(400).json({ status: 'fail', message: 'Metal grade is required' });
   const result = await opcuaService.requestSpectrometerReading(metalGrade, deviationElements, deviationPercentage);
@@ -349,7 +349,7 @@ opcRouter.post('/opc-reading', async (req, res) => {
     : { status: 'error', message: result.error });
 });
 
-opcRouter.post('/generate-synthetic', (req, res) => {
+opcRouter.post('/generate-synthetic', requireAuth, requireRole('METALLURGIST', 'ADMIN'), requireDevOrTest('Synthetic spectrometer data generation'), (req, res) => {
   const { metalGrade, deviationElements = [], deviationPercentage = 10 } = req.body;
   if (!metalGrade) return res.status(400).json({ status: 'fail', message: 'Metal grade is required' });
   try {
@@ -368,7 +368,7 @@ opcRouter.get('/', (req, res) => {
   res.json({ status: 'success', results: readings.length, data: { data: readings } });
 });
 
-opcRouter.post('/', (req, res) => {
+opcRouter.post('/', requireAuth, requireRole('METALLURGIST', 'ADMIN'), requireDevOrTest('Manual synthetic reading persistence'), (req, res) => {
   const reading = { _id: String(nextReadingId++), ...req.body, createdAt: new Date() };
   readings.push(reading);
   res.status(201).json({ status: 'success', data: { data: reading } });
@@ -380,7 +380,7 @@ opcRouter.get('/:id', (req, res) => {
   res.json({ status: 'success', data: { data: reading } });
 });
 
-opcRouter.delete('/:id', (req, res) => {
+opcRouter.delete('/:id', requireAuth, requireRole('ADMIN'), requireDevOrTest('Manual synthetic reading deletion'), (req, res) => {
   const idx = readings.findIndex((r) => r._id === req.params.id);
   if (idx === -1) return res.status(404).json({ status: 'fail', message: 'No document found with that ID' });
   readings.splice(idx, 1);
@@ -398,8 +398,12 @@ app.use('/api/v1/spectrometer', opcRouter);
 
 // ======================= AI SERVICE PROXY (:8000) =======================
 const axios = require('axios');
-const AI_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
-const AGENT_URL = process.env.AGENT_SERVICE_URL || 'http://127.0.0.1:8001';
+const AI_URL = {
+  toString() { return process.env.AI_SERVICE_URL || 'http://127.0.0.1:8000'; }
+};
+const AGENT_URL = {
+  toString() { return process.env.AGENT_SERVICE_URL || 'http://127.0.0.1:8001'; }
+};
 
 async function proxy(res, method, url, data) {
   try {
@@ -420,8 +424,8 @@ async function proxy(res, method, url, data) {
 const aiRouter = express.Router();
 
 aiRouter.get('/health', (req, res) => proxy(res, 'get', `${AI_URL}/health`));
-aiRouter.post('/anomaly/predict', (req, res) => proxy(res, 'post', `${AI_URL}/anomaly/predict`, req.body));
-aiRouter.post('/individual/analyze', async (req, res) => {
+aiRouter.post('/anomaly/predict', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'QUALITY_MANAGER', 'ADMIN'), (req, res) => proxy(res, 'post', `${AI_URL}/anomaly/predict`, req.body));
+aiRouter.post('/individual/analyze', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'QUALITY_MANAGER', 'ADMIN'), async (req, res) => {
   const { metalGrade, composition } = req.body;
   if (!metalGrade) return res.status(400).json({ status: 'fail', message: 'Metal grade is required' });
   if (!composition) return res.status(400).json({ status: 'fail', message: 'Composition data is required' });
@@ -466,7 +470,7 @@ aiRouter.post('/individual/analyze', async (req, res) => {
     },
   });
 });
-aiRouter.post('/agent/analyze', async (req, res) => {
+aiRouter.post('/agent/analyze', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'QUALITY_MANAGER', 'ADMIN'), async (req, res) => {
   const { metalGrade, composition } = req.body;
   if (!metalGrade) return res.status(400).json({ status: 'fail', message: 'Metal grade is required' });
   if (!composition) return res.status(400).json({ status: 'fail', message: 'Composition data is required' });
@@ -507,7 +511,7 @@ aiRouter.post('/agent/analyze', async (req, res) => {
     });
   }
 });
-aiRouter.post('/explain', async (req, res) => {
+aiRouter.post('/explain', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'QUALITY_MANAGER', 'ADMIN'), async (req, res) => {
   // Frontend (AIAgent.jsx) sends { metalGrade, composition, anomalyResult,
   // alloyResult } — the Agent's /copilot/explain only requires
   // { composition, grade }. Translate field names + wrap the response in
@@ -522,8 +526,8 @@ aiRouter.post('/explain', async (req, res) => {
     res.status(503).json({ status: 'error', message: `Could not reach ${AGENT_URL}/copilot/explain (${err.message})` });
   }
 });
-aiRouter.post('/analyze-with-explanation', (req, res) => proxy(res, 'post', `${AGENT_URL}/analyze-with-explanation`, req.body));
-aiRouter.post('/what-if', (req, res) => proxy(res, 'post', `${AGENT_URL}/copilot/what-if`, req.body));
+aiRouter.post('/analyze-with-explanation', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'QUALITY_MANAGER', 'ADMIN'), (req, res) => proxy(res, 'post', `${AGENT_URL}/analyze-with-explanation`, req.body));
+aiRouter.post('/what-if', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'ADMIN'), (req, res) => proxy(res, 'post', `${AGENT_URL}/copilot/what-if`, req.body));
 aiRouter.get('/gemini/health', (req, res) => proxy(res, 'get', `${AGENT_URL}/health`));
 
 app.use('/api/v2/ai', aiRouter);
@@ -532,7 +536,7 @@ app.use('/api/v2/ai', aiRouter);
 // Chains: Anomaly Detection -> Alloy Recommendation -> RL Optimization ->
 // Cost + Carbon + Trust annotation — all from ONE composition input, so
 // the frontend doesn't need to copy data between separate pages.
-app.post('/api/v2/workflow/full-analysis', async (req, res) => {
+app.post('/api/v2/workflow/full-analysis', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'ADMIN'), async (req, res) => {
   const { metalGrade, composition, batchWeightKg, topK } = req.body;
   if (!metalGrade) return res.status(400).json({ status: 'fail', message: 'Metal grade is required' });
   if (!composition) return res.status(400).json({ status: 'fail', message: 'Composition data is required' });
@@ -792,7 +796,7 @@ function computeCarbonEstimate({ grade, batchWeightKg, recommendedAdditions = {}
 // than trust it blindly. Purely additive annotation, no model changes.
 let nextCostId = 1;
 
-rlRouter.post('/optimize', async (req, res) => {
+rlRouter.post('/optimize', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'ADMIN'), async (req, res) => {
   // Frontend sends topK (camelCase); the Agent service's Pydantic schema
   // requires top_k (snake_case). Convert before forwarding.
   const { grade, composition, topK, top_k, batchWeightKg } = req.body;
@@ -899,7 +903,7 @@ rlRouter.post('/optimize', async (req, res) => {
   }
 });
 
-rlRouter.post('/feedback', async (req, res) => {
+rlRouter.post('/feedback', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'ADMIN'), async (req, res) => {
   const { grade, composition, additions, aggressiveness, outcome, actualResult, actual_result, operatorNote, operator_note } = req.body;
   const body = {
     grade,
@@ -952,10 +956,10 @@ app.use('/api/v2/rl', rlRouter);
 // ======================= VECTOR SEARCH PROXY (Actian VectorAI DB) =======================
 const vectorRouter = express.Router();
 vectorRouter.get('/status', (req, res) => proxy(res, 'get', `${AGENT_URL}/vector/status`));
-vectorRouter.post('/reindex', (req, res) => proxy(res, 'post', `${AGENT_URL}/vector/reindex`, {}));
-vectorRouter.post('/search', (req, res) => proxy(res, 'post', `${AGENT_URL}/vector/search`, req.body));
-vectorRouter.post('/memory/add', (req, res) => proxy(res, 'post', `${AGENT_URL}/vector/memory/add`, req.body));
-vectorRouter.post('/memory/recall', (req, res) => proxy(res, 'post', `${AGENT_URL}/vector/memory/recall`, req.body));
+vectorRouter.post('/reindex', requireAuth, requireRole('ADMIN'), (req, res) => proxy(res, 'post', `${AGENT_URL}/vector/reindex`, {}));
+vectorRouter.post('/search', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'QUALITY_MANAGER', 'ADMIN'), (req, res) => proxy(res, 'post', `${AGENT_URL}/vector/search`, req.body));
+vectorRouter.post('/memory/add', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'ADMIN'), (req, res) => proxy(res, 'post', `${AGENT_URL}/vector/memory/add`, req.body));
+vectorRouter.post('/memory/recall', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'ADMIN'), (req, res) => proxy(res, 'post', `${AGENT_URL}/vector/memory/recall`, req.body));
 app.use('/api/v2/vector', vectorRouter);
 
 // ======================= COST INTELLIGENCE =======================
@@ -989,7 +993,7 @@ costRouter.patch('/prices', requireAuth, requireRole('SALES_FINANCE', 'ADMIN'), 
   });
 });
 
-costRouter.post('/estimate', (req, res) => {
+costRouter.post('/estimate', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'SALES_FINANCE', 'ADMIN'), (req, res) => {
   const { grade, batchWeightKg, recommendedAdditions, basePricePerKg } = req.body;
   if (!grade) return res.status(400).json({ status: 'fail', message: 'grade is required' });
   if (!batchWeightKg) return res.status(400).json({ status: 'fail', message: 'batchWeightKg is required' });
@@ -1046,7 +1050,7 @@ carbonRouter.patch('/factors', requireAuth, requireRole('METALLURGIST', 'ADMIN')
   });
 });
 
-carbonRouter.post('/estimate', (req, res) => {
+carbonRouter.post('/estimate', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'SALES_FINANCE', 'ADMIN'), (req, res) => {
   const { grade, batchWeightKg, recommendedAdditions, baseCo2PerKg } = req.body;
   if (!grade) return res.status(400).json({ status: 'fail', message: 'grade is required' });
   if (!batchWeightKg) return res.status(400).json({ status: 'fail', message: 'batchWeightKg is required' });
@@ -1077,7 +1081,7 @@ app.use('/api/v2/carbon', carbonRouter);
 const alertLog = [];
 let nextAlertId = 1;
 
-app.post('/api/v2/alerts/simulate', (req, res) => {
+app.post('/api/v2/alerts/simulate', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'QUALITY_MANAGER', 'ADMIN'), requireDevOrTest('Alert simulation'), (req, res) => {
   const { grade, severity, deviationElements = [], batchId, operatorName } = req.body;
   if (!grade || !severity) {
     return res.status(400).json({ status: 'fail', message: 'grade and severity are required' });
@@ -1392,6 +1396,11 @@ function startServer(startPort, attemptsLeft = 10) {
       process.exit(1);
     }
   });
+  return server;
 }
 
-startServer(port);
+if (require.main === module) {
+  startServer(port);
+}
+
+module.exports = { app, startServer };

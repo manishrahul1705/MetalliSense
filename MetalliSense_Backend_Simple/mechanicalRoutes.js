@@ -5,10 +5,13 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
+const { requireAuth, requireRole } = require('./premeltGate/authMiddleware');
 
-const AI_URL = process.env.AI_ENGINE_URL || process.env.AI_API_URL || 'http://localhost:8000';
+const AI_URL = {
+  toString() { return process.env.AI_ENGINE_URL || process.env.AI_API_URL || 'http://127.0.0.1:8000'; }
+};
 
-router.post('/predict', async (req, res) => {
+router.post('/predict', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'QUALITY_MANAGER', 'ADMIN'), async (req, res) => {
   try {
     const { grade, composition, mode = 'formula' } = req.body;
     if (!grade || !composition) {
@@ -22,7 +25,7 @@ router.post('/predict', async (req, res) => {
   }
 });
 
-router.post('/predict/batch', async (req, res) => {
+router.post('/predict/batch', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'QUALITY_MANAGER', 'ADMIN'), async (req, res) => {
   try {
     const { items, mode = 'ml' } = req.body;
     if (!items || !Array.isArray(items)) {
@@ -35,7 +38,7 @@ router.post('/predict/batch', async (req, res) => {
   }
 });
 
-router.post('/ce-check', async (req, res) => {
+router.post('/ce-check', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'QUALITY_MANAGER', 'ADMIN'), async (req, res) => {
   try {
     const { grade, composition } = req.body;
     if (!grade || !composition) {

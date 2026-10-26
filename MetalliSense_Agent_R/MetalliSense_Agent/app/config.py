@@ -49,8 +49,8 @@ ANOMALY_CONTAMINATION = 0.05  # Expected proportion of outliers (highly sensitiv
 RANDOM_STATE = 42
 
 # API settings
-API_HOST = "0.0.0.0"
-API_PORT = 8001
+API_HOST = os.getenv("API_HOST", "127.0.0.1")
+API_PORT = int(os.getenv("API_PORT", 8001))
 API_TITLE = "MetalliSense AI Service"
 API_VERSION = "1.0.0"
 
