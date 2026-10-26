@@ -26,6 +26,7 @@ import { spawn } from 'node:child_process';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert';
+import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 
 const VIEWPORTS = [
@@ -70,7 +71,8 @@ async function main() {
   try {
     // 1. Launch Vite Preview Server on dedicated port 4182
     console.log(`Starting preview server on port ${PORT}...`);
-    const frontendDir = path.resolve('MetalliSense_Frontend_R/MetalliSense_Frontend');
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+    const frontendDir = path.resolve(__dirname, '..');
     const viteBin = path.join(frontendDir, 'node_modules/vite/bin/vite.js');
 
     server = spawn(process.execPath, [
