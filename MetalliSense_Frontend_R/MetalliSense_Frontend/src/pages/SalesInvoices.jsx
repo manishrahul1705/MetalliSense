@@ -41,8 +41,8 @@ function DemoBanner({ seller }) {
 }
 
 function InvoiceDoc({ inv }) {
-  const s = inv.seller;
-  const c = inv.customer;
+  const s = inv?.seller || {};
+  const c = typeof inv?.customer === 'string' ? { name: inv.customer } : (inv?.customer || {});
   return (
     <div className="print-area mx-auto w-full max-w-[210mm] bg-white text-metal-900 shadow-xl ring-1 ring-metal-200 p-10 text-[12.5px] leading-relaxed">
       <DemoBanner seller={s} />
