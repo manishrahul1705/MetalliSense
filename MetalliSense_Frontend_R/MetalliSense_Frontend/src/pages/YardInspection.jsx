@@ -120,7 +120,7 @@ export default function YardInspection() {
       <div className="grid lg:grid-cols-[22rem_1fr] gap-6 items-start">
         <div className="space-y-6">
           <Card>
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <span className={clsx("w-2.5 h-2.5 rounded-full", connected ? "bg-primary-500" : status?.server?.isRunning ? "bg-amber-400" : "bg-red-500")} />
                 <span className="font-semibold text-metal-900 text-sm">{connected ? "Gun connected" : status?.server?.isRunning ? "Gun ready, not connected" : "Gun simulator offline"}</span>
@@ -130,7 +130,7 @@ export default function YardInspection() {
               </Button>
             </div>
             <p className="font-mono text-[11px] text-metal-500 mt-2 break-all">{status?.server?.endpoint || "opc.tcp://localhost:4335/MetalliSense/HandheldGun"}</p>
-            <div className="flex items-center justify-between mt-3 text-xs text-metal-600">
+            <div className="flex flex-wrap items-center justify-between gap-2 mt-3 text-xs text-metal-600">
               <span>LIBS argon: <strong className="tabular-nums">{status?.server?.argonRemaining ?? "—"}</strong> carbon tests left</span>
               <button className="text-primary-700 hover:underline" onClick={async () => { await replaceArgon(); loadStatus(); toast.success("Argon canister replaced"); }}>Replace canister</button>
             </div>
@@ -164,7 +164,7 @@ export default function YardInspection() {
                 </div>
               )}
               <Field label="Device">
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {[["XRF", "Seconds per piece. No carbon; low Si/P/S below detection."], ["LIBS", "Grind + argon, ~40 s per piece. Measures carbon."]].map(([d, hint]) => (
                     <button key={d} type="button" onClick={() => setForm({ ...form, device: d })}
                       className={clsx("rounded-lg border-2 px-3 py-2 text-left focus:outline-none focus:ring-2 focus:ring-primary-500", form.device === d ? "border-primary-500 bg-primary-50" : "border-metal-200")}>
