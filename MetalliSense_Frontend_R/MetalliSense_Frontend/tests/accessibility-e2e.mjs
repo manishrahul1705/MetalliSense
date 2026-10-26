@@ -84,9 +84,15 @@ async function run() {
       }));
     });
 
+    async function gotoRoute(route) {
+      const isHash = await page.evaluate(() => !!window.__METALLISENSE_MOCK__ || window.location.hash.startsWith('#'));
+      const targetUrl = isHash ? `${BASE_URL}/#/${route}` : `${BASE_URL}/${route}`;
+      await page.goto(targetUrl);
+    }
+
     // 1. Reduced Motion Emulation Check
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    await page.goto(`${BASE_URL}/#/dashboard`);
+    await gotoRoute('dashboard');
     await page.waitForFunction(() => !!window.__METALLISENSE_MOCK__ || (document.readyState === "complete" && !!document.querySelector("h1, h2, nav, body, button")));
 
     const prefersReduced = await page.evaluate(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -118,7 +124,7 @@ async function run() {
     record('Sequential keyboard navigation provides visible focus', focusedCount >= 3, { focusedElements: focusedCount, samples: focusSamples.slice(0, 5) });
 
     // 3. Dialog Modal Lifecycle & Focus Trapping Check
-    await page.goto(`${BASE_URL}/#/grades`);
+    await gotoRoute('grades');
     await page.waitForFunction(() => !!window.__METALLISENSE_MOCK__ || (document.readyState === "complete" && !!document.querySelector("h1, h2, nav, body, button")));
 
     const addBtn = page.getByRole('button', { name: /Add New Grade/i }).first();
@@ -202,7 +208,7 @@ async function run() {
     record('WCAG AA Color Contrast Verification across UI text and controls', contrastMetrics.complianceRate >= 0.80, contrastMetrics);
 
     // 5. Role-Aware Semantic Structure Check
-    await page.goto(`${BASE_URL}/#/premelt-gate`);
+    await gotoRoute('premelt-gate');
     await page.waitForFunction(() => !!window.__METALLISENSE_MOCK__ || (document.readyState === "complete" && !!document.querySelector("h1, h2, nav, body, button")));
     const semanticCounts = await page.evaluate(() => {
       return {
