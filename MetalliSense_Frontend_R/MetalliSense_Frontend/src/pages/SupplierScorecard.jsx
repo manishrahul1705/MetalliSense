@@ -747,7 +747,7 @@ export default function SupplierScorecard() {
               </p>
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button onClick={() => setPanel(panel === "ahp" ? null : "ahp")} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white/80 ring-1 ring-white/15 hover:bg-white/10"><Scale size={13} />AHP weights</button>
             <button onClick={() => setPanel(panel === "manual" ? null : "manual")} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white/80 ring-1 ring-white/15 hover:bg-white/10"><SlidersHorizontal size={13} />Criteria</button>
             <button onClick={load} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white/80 ring-1 ring-white/15 hover:bg-white/10"><RefreshCw size={13} />Refresh</button>
@@ -784,7 +784,7 @@ export default function SupplierScorecard() {
             </button>
           ))}
         </div>
-        <div className="inline-flex rounded-xl bg-metal-100 p-1">
+        <div className="inline-flex flex-wrap rounded-xl bg-metal-100 p-1">
           {VIEW_TABS.map(([k, label]) => (
             <button key={k} onClick={() => setView(k)}
               className={clsx("rounded-lg px-3 py-1 text-xs font-semibold transition-colors", view === k ? "bg-white shadow text-metal-900" : "text-metal-500 hover:text-metal-800")}>

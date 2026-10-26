@@ -51,7 +51,7 @@ export default function SemanticSearch() {
       </div>
 
       <Card>
-        <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-3">
+        <form onSubmit={handleSearch} className="flex flex-col md:flex-row gap-3">
           <div className="flex-1">
             <Input
               placeholder='e.g. "high carbon reading that looks out of spec"'
@@ -63,7 +63,7 @@ export default function SemanticSearch() {
           <Select
             value={collection}
             onChange={(e) => setCollection(e.target.value)}
-            className="sm:w-48"
+            className="md:w-48"
             options={[
               { value: "training_data", label: "Training Data" },
               { value: "grades", label: "Grade Specs" },

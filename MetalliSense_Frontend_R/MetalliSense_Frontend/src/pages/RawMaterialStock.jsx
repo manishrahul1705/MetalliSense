@@ -500,7 +500,7 @@ export default function RawMaterialStock() {
             <p className="text-metal-500 text-sm">Every lot from weighbridge to furnace. Nothing is charged until it is tested and released.</p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="ghost" size="sm" onClick={load} loading={loading}><RefreshCw size={14} className="mr-1" />Refresh</Button>
           <Button variant="ghost" size="sm" onClick={() => setAlloyOpen(true)}>+ Receive alloy batch</Button>
           <Button size="sm" onClick={() => setReceiveOpen(true)}><Truck size={16} className="mr-1.5" />Receive truck</Button>
