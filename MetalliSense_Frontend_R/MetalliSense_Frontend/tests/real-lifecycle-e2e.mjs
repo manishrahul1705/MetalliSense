@@ -228,14 +228,23 @@ async function run() {
       await page.waitForTimeout(1200);
       meltingStarted = true;
     } else {
+      // Gate is on HOLD: switch to Metallurgist to perform authorized Engineer Override
+      await loginAs('metallurgist1', 'MetallurgyPass123!');
+      await page.goto(`${FRONTEND_URL}/premelt-gate`);
+      await page.waitForTimeout(600);
+      const opInput2 = page.locator('input[placeholder="Name"]');
+      if (await opInput2.isVisible().catch(() => false)) {
+        await opInput2.fill('operator1');
+        await page.waitForTimeout(200);
+      }
       const overrideLink = page.getByRole('button', { name: /Engineer override/i });
-            if (await overrideLink.isVisible().catch(() => false)) {
+      if (await overrideLink.isVisible().catch(() => false)) {
         await overrideLink.click();
         await page.waitForTimeout(300);
-        await page.locator('input[placeholder="Engineer name"]').fill('Dr. Metallurgist');
-        await page.locator('input[placeholder*="Reason"]').fill('Authorized override for high priority heat processing with scrap adjustments');
+        await page.locator('input[placeholder="Engineer name"]').fill('metallurgist1');
+        await page.locator('input[placeholder*="Reason"]').fill('Supervised metallurgical trial with controlled fluxing additions.');
         const overrideBtn = page.getByRole('button', { name: /Override and start melting/i });
-                if (await overrideBtn.isVisible().catch(() => false) && await overrideBtn.isEnabled().catch(() => false)) {
+        if (await overrideBtn.isVisible().catch(() => false) && await overrideBtn.isEnabled().catch(() => false)) {
           await overrideBtn.click();
           await page.waitForTimeout(1200);
           meltingStarted = true;

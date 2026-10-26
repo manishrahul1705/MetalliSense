@@ -5,17 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
-// Ensure external dependencies from outside repo are available without polluting source repo
-const externalModulesPath = 'C:\\Users\\Manish\\Downloads\\MetalliSense-COMPLETE-FINAL\\MetalliSense_Backend_Simple\\node_modules';
-if (fs.existsSync(externalModulesPath)) {
-  if (!module.paths.includes(externalModulesPath)) {
-    module.paths.push(externalModulesPath);
-  }
-  const Module = require('module');
-  if (Module.globalPaths && !Module.globalPaths.includes(externalModulesPath)) {
-    Module.globalPaths.push(externalModulesPath);
-  }
-}
+// Isolated test environment configured with local package dependencies
 
 // Set an isolated test DB path before requiring db / store
 const testDbDir = path.join(os.tmpdir(), 'metallisense-stage1a-test');

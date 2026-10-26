@@ -829,20 +829,44 @@ rlRouter.post('/optimize', async (req, res) => {
     res.status(200).json({ status: 'success', data: agentData });
   } catch (err) {
     if (err.response) return res.status(err.response.status).json(err.response.data);
-    const candidates = [
+    const { GRADE_SPECS } = require('./premeltGate/config');
+    const targetSpec = (GRADE_SPECS && GRADE_SPECS[grade.toUpperCase()]) || { C: [3.0, 4.0], Si: [1.8, 2.8], Mn: [0.3, 1.0] };
+    const comp = composition || {};
+    
+    // Balanced: target spec midpoint
+    const balSi = Math.max(0, ((targetSpec.Si[0] + targetSpec.Si[1]) / 2) - (comp.Si || 0));
+    const balMn = Math.max(0, ((targetSpec.Mn[0] + targetSpec.Mn[1]) / 2) - (comp.Mn || 0));
+    const balFeSiKg = Math.round(((balSi / 100) * weight / (0.75 * 0.85)) * 10) / 10;
+    const balFeMnKg = Math.round(((balMn / 100) * weight / (0.70 * 0.85)) * 10) / 10;
+
+    // Conservative: target lower quartile
+    const conSi = Math.max(0, (targetSpec.Si[0] + 0.1) - (comp.Si || 0));
+    const conMn = Math.max(0, (targetSpec.Mn[0] + 0.05) - (comp.Mn || 0));
+    const conFeSiKg = Math.round(((conSi / 100) * weight / (0.75 * 0.85)) * 10) / 10;
+    const conFeMnKg = Math.round(((conMn / 100) * weight / (0.70 * 0.85)) * 10) / 10;
+
+    const rawCandidates = [
       {
         strategy: 'balanced',
         aggressiveness: 0.5,
         predicted_reward: 0.85,
-        recommended_additions: { 'FeSi-75': 10, 'HC FeMn': 5 }
+        recommended_additions: {
+          'FeSi-75': balFeSiKg > 0 ? balFeSiKg : 5,
+          'HC FeMn': balFeMnKg > 0 ? balFeMnKg : 2.5
+        }
       },
       {
         strategy: 'conservative',
         aggressiveness: 0.2,
         predicted_reward: 0.72,
-        recommended_additions: { 'FeSi-75': 5, 'HC FeMn': 2.5 }
+        recommended_additions: {
+          'FeSi-75': conFeSiKg > 0 ? conFeSiKg : 2.5,
+          'HC FeMn': conFeMnKg > 0 ? conFeMnKg : 1.2
+        }
       }
-    ].map((c) => {
+    ];
+
+    const candidates = rawCandidates.map((c) => {
       const cost = computeCostEstimate({
         grade,
         batchWeightKg: weight,
@@ -860,7 +884,18 @@ rlRouter.post('/optimize', async (req, res) => {
         ...computeCandidateSavings(grade, cost.totalAdditionsCost),
       };
     });
-    res.status(200).json({ status: 'success', data: { candidates, isFallback: true } });
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        candidates,
+        isFallback: true,
+        advisoryOnly: true,
+        modelStatus: 'OFFLINE',
+        method: 'DETERMINISTIC_MASS_BALANCE',
+        notice: 'Advisory candidate additions computed via deterministic mass balance. Agent offline.'
+      }
+    });
   }
 });
 
@@ -881,8 +916,14 @@ rlRouter.post('/feedback', async (req, res) => {
     res.status(response.status).json(response.data);
   } catch (err) {
     if (err.response) return res.status(err.response.status).json(err.response.data);
-    rlFeedbackLog.unshift({ ...body, computedReward: 0.85, fallback: true, createdAt: new Date() });
-    res.status(200).json({ status: 'success', recorded: true, fallback: true, computed_reward: 0.85, message: 'Feedback logged locally (agent sidecar offline)' });
+    rlFeedbackLog.unshift({ ...body, computedReward: null, agentOffline: true, createdAt: new Date() });
+    res.status(200).json({
+      status: 'success',
+      recorded: true,
+      agentOffline: true,
+      computed_reward: null,
+      message: 'Feedback logged locally (agent sidecar offline)'
+    });
   }
 });
 
@@ -892,7 +933,12 @@ rlRouter.get('/policy/status', async (req, res) => {
     res.status(200).json({ status: 'success', data: response.data });
   } catch (err) {
     if (err.response) return res.status(err.response.status).json(err.response.data);
-    res.status(200).json({ status: 'success', data: { avg_reward_last_100: 0.852, n_updates: 124, known_grades: ['SG-IRON', 'GREY-IRON', 'LOW-CARBON-STEEL'] } });
+    res.status(200).json({
+      status: 'offline',
+      online: false,
+      message: 'RL Agent sidecar is offline (advisory mode)',
+      data: null
+    });
   }
 });
 
