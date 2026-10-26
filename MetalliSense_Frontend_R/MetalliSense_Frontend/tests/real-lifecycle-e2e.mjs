@@ -37,7 +37,7 @@ function waitForPort(port, timeout = 30000) {
   const start = Date.now();
   return new Promise((resolve, reject) => {
     function check() {
-      const req = http.get(`http://localhost:${port}/api/v1/health`, (res) => {
+      const req = http.get(`http://127.0.0.1:${port}/api/v1/health`, (res) => {
         resolve();
       });
       req.on('error', () => {
@@ -123,6 +123,8 @@ async function run() {
       windowsHide: true,
       stdio: 'pipe'
     });
+    backendProc.stdout.on('data', d => console.log('[backend]', d.toString().trim()));
+    backendProc.stderr.on('data', d => console.error('[backend err]', d.toString().trim()));
 
     await waitForPort(BACKEND_PORT);
     console.log(`Backend is ready at ${BACKEND_URL} (PID: ${backendProc.pid})`);
