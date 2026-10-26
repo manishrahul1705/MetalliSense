@@ -50,8 +50,14 @@ export const deductAdditives = (lines, options = {}) => {
     ? options
     : (options?.idempotencyKey || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `deduct-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`));
   const headers = { 'Idempotency-Key': key };
-  return api.post(`${P}/additives/deduct`, { lines }, { headers });
+  const heatId = (typeof options === 'object' && options?.heatId) || lines?.[0]?.heatId;
+  const candidateId = typeof options === 'object' ? options?.candidateId : undefined;
+  const candidateHash = typeof options === 'object' ? options?.candidateHash : undefined;
+  return api.post(`${P}/additives/deduct`, { lines, heatId, candidateId, candidateHash }, { headers });
 };
+export const evaluateCorrection = (data) => api.post(`${P}/corrections/evaluate`, data);
+export const approveCorrection = (data) => api.post(`${P}/corrections/approve`, data);
+
 export const receiveFerroalloy = (data) => api.post(`${P}/additives/receive`, data);
 export const getAudit = (limit = 50) => api.get(`${P}/audit`, { params: { limit } });
 export const resetDemo = () => api.post(`${P}/demo/reset`);

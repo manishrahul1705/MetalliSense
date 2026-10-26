@@ -21,24 +21,24 @@ const TopBar = ({ title, actions }) => {
   const primaryRole = user?.roles?.[0] || "OPERATOR";
 
   return (
-    <div className="bg-white/80 backdrop-blur-sm border-b border-metal-200 pl-16 pr-3 sm:px-6 py-2 sm:py-4 shadow-sm">
+    <div className="bg-white/80 backdrop-blur-sm border-b border-metal-200 pl-14 sm:pl-16 pr-2 sm:px-6 py-2 sm:py-4 shadow-sm min-w-0">
       <div className="flex justify-between items-center">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <div className="w-1.5 h-8 sm:h-10 bg-gradient-to-b from-emerald-500 to-emerald-600 rounded-full shadow-md flex-shrink-0" />
-          <h1 className="text-lg sm:text-2xl font-bold text-metal-900 truncate max-w-[180px] sm:max-w-none">{title}</h1>
+          <h1 className="text-sm sm:text-2xl font-bold text-metal-900 truncate max-w-[120px] sm:max-w-[200px] lg:max-w-none">{title}</h1>
         </div>
         <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
           {actions}
-          <div className="hidden md:flex"><OPCStatusIndicator /></div>
+          <div className="hidden lg:flex"><OPCStatusIndicator /></div>
 
           {/* User Menu or Sign In */}
           {user ? (
             <div className="relative">
               <button
                 onClick={() => setShowUserMenu(!showUserMenu)}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors border border-gray-200"
+                className="flex items-center gap-1 sm:gap-2 px-1.5 sm:px-3 py-1 sm:py-2 rounded-lg hover:bg-gray-100 transition-colors border border-gray-200"
               >
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-600 to-teal-700 flex items-center justify-center text-white font-semibold text-sm shadow">
+                <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-gradient-to-br from-emerald-600 to-teal-700 flex items-center justify-center text-white font-semibold text-xs sm:text-sm shadow">
                   {user.displayName
                     ? user.displayName.charAt(0).toUpperCase()
                     : user.username?.charAt(0).toUpperCase()}
@@ -93,7 +93,7 @@ const TopBar = ({ title, actions }) => {
           ) : (
             <Link
               to="/login"
-              className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-sm"
+              className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-sm"
             >
               <LogIn className="w-4 h-4" />
               <span>Sign In</span>

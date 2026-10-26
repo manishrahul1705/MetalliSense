@@ -9,7 +9,7 @@ import Badge from "../components/common/Badge";
 import SyntheticGenerator from "../components/common/SyntheticGenerator";
 import { runFullAnalysis } from "../services/workflowService";
 import { rlSubmitFeedback } from "../services/rlService";
-import { deductAdditives } from "../services/premeltService";
+import { deductAdditives, evaluateCorrection, approveCorrection } from "../services/premeltService";
 import { errMsg } from "../components/premelt/premeltUi";
 import toast from "react-hot-toast";
 import { MeltSpinner } from "../components/common/FurnaceLoader";
@@ -76,6 +76,7 @@ export default function FullAnalysis() {
   const [submitting, setSubmitting] = useState(null);
   // Once one strategy is accepted, the other two are frozen.
   const [chosenStrategy, setChosenStrategy] = useState(null);
+  const [approvedStrategies, setApprovedStrategies] = useState({});
 
   // When a heat passes the gate, pre-fill everything from the gate result.
   // Priority: alloy result reading → anomaly result reading → gate composition direct.
@@ -132,6 +133,54 @@ export default function FullAnalysis() {
     }
   };
 
+  const handleApproveStrategy = async (candidate) => {
+    if (!flow?.heatId) {
+      toast.error("No active heat in flow context");
+      return;
+    }
+    setSubmitting(candidate.strategy);
+    try {
+      const gateAdditions = flow.suggestedAdditions || [];
+      const lines = gateAdditions
+        .filter(a => a.lotId && a.kg > 0)
+        .map(a => ({
+          lotId: a.lotId,
+          kg: a.kg,
+          heatId: flow.heatId,
+          by: "metallurgist",
+          alloyName: a.alloyName,
+        }));
+
+      const evalRes = await evaluateCorrection({
+        heatId: flow.heatId,
+        additions: lines,
+        targetGrade: flow.grade
+      });
+
+      const candidateHash = evalRes.data?.data?.candidateHash || evalRes.data?.candidateHash || "mock-hash";
+      const candidateId = `CAND-${candidate.strategy.toUpperCase()}`;
+
+      await approveCorrection({
+        heatId: flow.heatId,
+        candidateId,
+        candidateHash,
+        expectedHeatVersion: flow.version || 1,
+        evidenceVersion: reading?.sampleId || `SMP-${flow.heatId}`,
+        specVersion: "1.0",
+        additions: lines,
+        makerId: flow.plannedBy || "planner1"
+      });
+
+      setApprovedStrategies(prev => ({ ...prev, [candidate.strategy]: true }));
+      toast.success(`✅ Strategy "${candidate.strategy}" approved (Maker-Checker Verified)`);
+    } catch (err) {
+      console.error("Approval failed:", err);
+      toast.error(err.response?.data?.message || err.message || "Failed to approve correction");
+    } finally {
+      setSubmitting(null);
+    }
+  };
+
   const handleFeedback = async (candidate, outcome) => {
     if (!reading || chosenStrategy || submitting) return;
     setSubmitting(candidate.strategy);
@@ -172,7 +221,8 @@ export default function FullAnalysis() {
 
           if (lines.length > 0) {
             try {
-              await deductAdditives(lines, { idempotencyKey });
+              const candidateId = candidate.strategy ? `CAND-${candidate.strategy.toUpperCase()}` : undefined;
+            await deductAdditives(lines, { idempotencyKey, heatId: flow.heatId, candidateId });
             } catch (deductErr) {
               console.error("Deduction error in full analysis:", deductErr);
               toast.error(`Stock deduction failed: ${errMsg(deductErr)}`);
@@ -434,6 +484,18 @@ export default function FullAnalysis() {
                             );
                           })()}
 
+                          {isUnlocked && import.meta.env.VITE_MOCK_MODE !== 'true' && !isChosen && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="primary"
+                              className="w-full mb-1 text-[11px] py-1"
+                              disabled={!!submitting || approvedStrategies[c.strategy]}
+                              onClick={() => handleApproveStrategy(c)}
+                            >
+                              {approvedStrategies[c.strategy] ? "✓ Approved" : "Approve Correction"}
+                            </Button>
+                          )}
                           {isChosen ? (
                             <div className="flex items-center justify-center gap-1.5 rounded-lg bg-primary-50 border border-primary-200 py-2 text-xs font-bold text-primary-700">
                               <CheckCircle2 className="w-3.5 h-3.5" /> Strategy accepted

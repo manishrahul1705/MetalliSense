@@ -88,7 +88,7 @@ export default function Signup() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-green-50 px-4 py-12">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-green-50 px-2 sm:px-4 py-12">
       <div className="max-w-md w-full space-y-8">
         {/* Logo and Title */}
         <div className="text-center">
@@ -99,7 +99,7 @@ export default function Signup() {
         </div>
 
         {/* Signup Form */}
-        <div className="bg-white rounded-lg shadow-2xl p-8 border border-gray-200">
+        <div className="bg-white rounded-lg shadow-2xl p-4 sm:p-8 border border-gray-200">
           <form onSubmit={handleSubmit} className="space-y-5">
             {/* Name Input */}
             <div>

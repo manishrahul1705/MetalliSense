@@ -445,7 +445,7 @@ export default function SalesInvoices() {
                       <tr key={i.invoiceId} className="border-b border-metal-100">
                         <td className="px-2 py-3 font-mono font-bold">{i.invoiceId}</td>
                         <td className="px-2">{dt(i.issuedAt)}</td>
-                        <td className="px-2">{i.customer.name}<span className="block text-[11px] text-metal-400">{i.intraState ? "CGST + SGST" : "IGST"} · {i.customer.state}</span></td>
+                        <td className="px-2">{i.customer?.name || i.customer || "Customer"}<span className="block text-[11px] text-metal-400">{i.intraState ? "CGST + SGST" : "IGST"} · {i.customer?.state || ""}</span></td>
                         <td className="px-2 font-mono">{i.heatId}</td>
                         <td className="px-2 text-right tabular-nums">{n(i.lines[0].qtyKg)} kg</td>
                         <td className="px-2 text-right tabular-nums font-bold">{rs(i.total)}</td>

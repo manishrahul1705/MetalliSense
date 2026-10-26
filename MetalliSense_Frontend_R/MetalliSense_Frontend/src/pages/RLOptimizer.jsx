@@ -9,7 +9,7 @@ import { Repeat, ThumbsUp, ThumbsDown, TrendingUp, CheckCircle2, ShieldCheck, Ga
 import { useNavigate } from "react-router-dom";
 import GateBanner from "../components/premelt/GateBanner";
 import { useMeltFlow } from "../context/MeltFlowContext";
-import { deductAdditives } from "../services/premeltService";
+import { deductAdditives, evaluateCorrection, approveCorrection } from "../services/premeltService";
 import { errMsg } from "../components/premelt/premeltUi";
 import StrategyComparison, { buildComparison } from "../components/rl/StrategyComparison";
 import toast from "react-hot-toast";
@@ -115,6 +115,7 @@ const RLOptimizer = () => {
   const [submitting, setSubmitting] = useState(null); // strategy name being submitted
   const [policyStatus, setPolicyStatus] = useState(null);
   const deductionKeysRef = useRef({});
+  const [approvedStrategies, setApprovedStrategies] = useState({});
 
   const getDeductionKey = (strategyName) => {
     if (!deductionKeysRef.current[strategyName]) {
@@ -190,6 +191,54 @@ const RLOptimizer = () => {
     }
   };
 
+  const handleApproveStrategy = async (candidate) => {
+    if (!flow?.heatId) {
+      toast.error("No active heat in flow context");
+      return;
+    }
+    setSubmitting(candidate.strategy);
+    try {
+      const gateAdditions = flow.suggestedAdditions || [];
+      const lines = gateAdditions
+        .filter(a => a.lotId && a.kg > 0)
+        .map(a => ({
+          lotId: a.lotId,
+          kg: a.kg,
+          heatId: flow.heatId,
+          by: "metallurgist",
+          alloyName: a.alloyName,
+        }));
+
+      const evalRes = await evaluateCorrection({
+        heatId: flow.heatId,
+        additions: lines,
+        targetGrade: flow.grade
+      });
+
+      const candidateHash = evalRes.data?.data?.candidateHash || evalRes.data?.candidateHash || "mock-hash";
+      const candidateId = `CAND-${candidate.strategy.toUpperCase()}`;
+
+      await approveCorrection({
+        heatId: flow.heatId,
+        candidateId,
+        candidateHash,
+        expectedHeatVersion: flow.version || 1,
+        evidenceVersion: reading?.sampleId || `SMP-${flow.heatId}`,
+        specVersion: "1.0",
+        additions: lines,
+        makerId: flow.plannedBy || "planner1"
+      });
+
+      setApprovedStrategies(prev => ({ ...prev, [candidate.strategy]: true }));
+      toast.success(`✅ Strategy "${candidate.strategy}" approved (Maker-Checker Verified)`);
+    } catch (err) {
+      console.error("Approval failed:", err);
+      toast.error(err.response?.data?.message || err.message || "Failed to approve correction");
+    } finally {
+      setSubmitting(null);
+    }
+  };
+
   const handleFeedback = async (candidate, outcome) => {
     if (!reading || submitting) {
       if (!reading) toast.error("No active reading — generate a synthetic reading first");
@@ -235,7 +284,8 @@ const RLOptimizer = () => {
               }));
 
             if (lines.length > 0) {
-              await deductAdditives(lines, { idempotencyKey });
+              const candidateId = candidate.strategy ? `CAND-${candidate.strategy.toUpperCase()}` : undefined;
+            await deductAdditives(lines, { idempotencyKey, heatId: flow.heatId, candidateId });
             }
             acceptStrategy({ ...candidate, deductedLines: lines });
             toast.success(`✅ Strategy "${candidate.strategy}" accepted — stock deducted. Policy updated.`);
@@ -300,7 +350,7 @@ const RLOptimizer = () => {
           <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-50 text-primary-700">
             <TrendingUp className="w-4 h-4" />
             <span className="font-medium text-sm">
-              {policyStatus.n_updates.toLocaleString()} policy updates
+              {(policyStatus.n_updates ?? 0).toLocaleString()} policy updates
             </span>
           </div>
         )}
@@ -576,6 +626,20 @@ const RLOptimizer = () => {
                       );
                     })()}
 
+                    {isUnlocked && import.meta.env.VITE_MOCK_MODE !== 'true' && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="primary"
+                        className="w-full mb-2"
+                        disabled={!!submitting || approvedStrategies[c.strategy] || flow.stockStatus === 'deducted'}
+                        onClick={() => handleApproveStrategy(c)}
+                      >
+                        {approvedStrategies[c.strategy]
+                          ? <><ShieldCheck className="w-3 h-3 mr-1" /> Approved by Metallurgist</>
+                          : <><ShieldCheck className="w-3 h-3 mr-1" /> Review & Approve Correction</>}
+                      </Button>
+                    )}
                     <div className="flex gap-2">
                       <Button
                         type="button"

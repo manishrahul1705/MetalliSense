@@ -39,7 +39,7 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-green-50 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-green-50 px-2 sm:px-4">
       <div className="max-w-md w-full space-y-8">
         {/* Logo and Title */}
         <div className="text-center">
@@ -50,7 +50,7 @@ export default function Login() {
         </div>
 
         {/* Login Form */}
-        <div className="bg-white rounded-lg shadow-2xl p-8 border border-gray-200">
+        <div className="bg-white rounded-lg shadow-2xl p-4 sm:p-8 border border-gray-200">
           {error && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md flex items-center space-x-2 text-red-700 text-sm">
               <AlertCircle className="h-5 w-5 flex-shrink-0" />

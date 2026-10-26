@@ -23,6 +23,7 @@ import toast from "react-hot-toast";
 import { formatPercentage } from "../utils/formatters";
 import { MeltSpinner } from "../components/common/FurnaceLoader";
 import { completeHeat, getFinishedHeats } from "../services/salesService";
+import { getHeat } from "../services/premeltService";
 import { errMsg } from "../components/premelt/premeltUi";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3000";
@@ -250,6 +251,11 @@ export default function MechanicalProperties() {
   const handleApproveTap = async () => {
     if (!engineer.trim()) { toast.error("Enter the engineer's name to approve the tap"); return; }
     setApproving(true);
+    let activeVer = flow.version;
+    try {
+      const hRes = await getHeat(flow.heatId);
+      if (hRes.data?.data?.version !== undefined) activeVer = hRes.data.data.version;
+    } catch (_) {}
     try {
       const res = await completeHeat(flow.heatId, {
         approvedBy: engineer.trim(),
@@ -258,8 +264,8 @@ export default function MechanicalProperties() {
         standard: std,
         acceptedStrategy: flow.acceptedStrategy,
         gateDecision: flow.gateDecision,
-        version: flow.version,
-        expectedVersion: flow.version,
+        version: activeVer,
+        expectedVersion: activeVer,
       });
       setFinished(res.data.data);
       setServerMissing(false);

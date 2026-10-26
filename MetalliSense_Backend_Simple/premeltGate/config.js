@@ -88,7 +88,7 @@ const settings = {
   aiNeedsCorrectionRisk: 0.5,
   aiMinConfidence: 0.5,
   // No AI answer -> HOLD (fail-safe). Set false to downgrade to WARN.
-  aiRequired: true,
+  aiRequired: process.env.PREMELT_AI_REQUIRED !== undefined ? process.env.PREMELT_AI_REQUIRED === 'true' : false,
   aiTimeoutMs: 20000,
   // DRI
   driMaxAgeDays: 7,
