@@ -209,7 +209,8 @@ async function run() {
 
     // 5. Role-Aware Semantic Structure Check
     await gotoRoute('premelt-gate');
-    await page.waitForFunction(() => !!window.__METALLISENSE_MOCK__ || (document.readyState === "complete" && !!document.querySelector("h1, h2, nav, body, button")));
+    await page.waitForSelector('h1, h2, button', { timeout: 10000 });
+    await page.waitForTimeout(300);
     const semanticCounts = await page.evaluate(() => {
       return {
         buttons: document.querySelectorAll('button, [role="button"]').length,
