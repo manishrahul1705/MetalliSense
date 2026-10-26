@@ -93,7 +93,7 @@ const TopBar = ({ title, actions }) => {
           ) : (
             <Link
               to="/login"
-              className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-sm"
+              className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium bg-emerald-700 text-white rounded-lg hover:bg-emerald-800 transition-colors shadow-sm"
             >
               <LogIn className="w-4 h-4" />
               <span>Sign In</span>

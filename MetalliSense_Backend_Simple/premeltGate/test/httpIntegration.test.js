@@ -1,23 +1,31 @@
 const assert = require('assert');
 const http = require('http');
 const express = require('express');
-const { initTestDb, store, createMeltingHeat } = require('./testHelper');
+const { initTestDb, getDb, store, createMeltingHeat } = require('./testHelper');
+const dbModule = require('../db');
+const sec = require('../security');
+const { authenticate, csrfProtection } = require('../authMiddleware');
+const authRoutes = require('../authRoutes');
 const premelt = require('../routes');
 const salesRoutes = require('../salesRoutes');
 
 function makeRequest(serverUrl, { method, path, headers = {}, body = null }) {
   return new Promise((resolve, reject) => {
     const url = new URL(path, serverUrl);
+    const bodyStr = body ? (typeof body === 'string' ? body : JSON.stringify(body)) : null;
+    const reqHeaders = {
+      'Content-Type': 'application/json',
+      ...headers
+    };
+    if (bodyStr) {
+      reqHeaders['Content-Length'] = Buffer.byteLength(bodyStr);
+    }
     const options = {
       method,
       hostname: url.hostname,
       port: url.port,
       path: url.pathname + url.search,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Test-User-Id': 'operator1',
-        ...headers
-      }
+      headers: reqHeaders
     };
 
     const req = http.request(options, (res) => {
@@ -35,8 +43,8 @@ function makeRequest(serverUrl, { method, path, headers = {}, body = null }) {
     });
 
     req.on('error', reject);
-    if (body) {
-      req.write(typeof body === 'string' ? body : JSON.stringify(body));
+    if (bodyStr) {
+      req.write(bodyStr);
     }
     req.end();
   });
@@ -44,13 +52,20 @@ function makeRequest(serverUrl, { method, path, headers = {}, body = null }) {
 
 async function runTests() {
   const tests = [];
-  initTestDb();
 
-  // Create clean Express test app
+  process.env.NODE_ENV = 'test';
+  process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'http-integration-test-secret-32-chars-long!';
+
+  initTestDb();
+  const db = getDb();
+  dbModule.bootstrapDevAccounts(db, { forceBootstrap: true });
+
+  // Create clean Express test app with auth, CSRF protection, and routes
   const app = express();
-  const { authenticate } = require('../authMiddleware');
   app.use(express.json());
   app.use(authenticate);
+  app.use(csrfProtection);
+  app.use('/api/v2/auth', authRoutes);
   app.use('/api/v2/premelt', premelt.router);
   app.use('/api/v2/sales', salesRoutes);
 
@@ -58,6 +73,36 @@ async function runTests() {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port;
   const baseUrl = `http://127.0.0.1:${port}`;
+
+  async function loginUser(username, password) {
+    const res = await makeRequest(baseUrl, {
+      method: 'POST',
+      path: '/api/v2/auth/login',
+      body: { username, password }
+    });
+    assert.strictEqual(res.statusCode, 200, `Login failed for ${username}: ${JSON.stringify(res.data)}`);
+    const setCookieHeaders = [].concat(res.headers['set-cookie'] || []);
+    const cookies = {};
+    setCookieHeaders.forEach((c) => {
+      const part = c.split(';')[0];
+      const [k, v] = part.split('=');
+      if (k && v) cookies[k.trim()] = v.trim();
+    });
+    const sessionCookie = cookies['metallisense_session'];
+    const csrfCookie = cookies['metallisense_csrf'];
+    const csrfToken = res.data.csrfToken || csrfCookie;
+    return {
+      headers: {
+        'Cookie': `metallisense_session=${sessionCookie}; metallisense_csrf=${csrfCookie}`,
+        'X-CSRF-Token': csrfToken
+      }
+    };
+  }
+
+  // Pre-authenticate sessions for role testing
+  const operatorAuth = await loginUser('operator1', 'OperatorPass123!');
+  const qmAuth = await loginUser('qm1', 'QualityPass123!');
+  const adminAuth = await loginUser('admin1', 'AdminSecurePass123!');
 
   const test = async (name, fn) => {
     const t0 = Date.now();
@@ -78,12 +123,30 @@ async function runTests() {
       const lot = store.addLot({ materialType: 'FERROALLOY', alloyName: 'FeSi-75', receivedKg: 100, costPerKg: 100 }, 'stores');
       const key = `HTTP-IDEMP-001-${Date.now()}`;
 
+      sec.recordMakerCheckerReview({
+        entityType: 'ALLOY_CORRECTION',
+        entityId: heat.heatId,
+        entityVersion: heat.version,
+        makerId: 'operator1',
+        checkerId: 'metallurgist1',
+        decision: 'APPROVED',
+        reason: 'Authorized correction for TC-HTTP-001',
+        candidateId: 'CAND-HTTP-001',
+        candidateHash: 'HASH-HTTP-001',
+        additions: [{ lotId: lot.lotId, kg: 12.5 }]
+      });
+
       const res = await makeRequest(baseUrl, {
         method: 'POST',
         path: '/api/v2/premelt/additives/deduct',
-        headers: { 'Idempotency-Key': key },
+        headers: {
+          ...operatorAuth.headers,
+          'Idempotency-Key': key
+        },
         body: {
           heatId: heat.heatId,
+          candidateId: 'CAND-HTTP-001',
+          candidateHash: 'HASH-HTTP-001',
           lines: [{ lotId: lot.lotId, kg: 12.5 }]
         }
       });
@@ -98,15 +161,33 @@ async function runTests() {
       const lot = store.addLot({ materialType: 'FERROALLOY', alloyName: 'FeSi-75', receivedKg: 100, costPerKg: 100 }, 'stores');
       const key = `HTTP-IDEMP-002-${Date.now()}`;
 
+      sec.recordMakerCheckerReview({
+        entityType: 'ALLOY_CORRECTION',
+        entityId: heat.heatId,
+        entityVersion: heat.version,
+        makerId: 'operator1',
+        checkerId: 'metallurgist1',
+        decision: 'APPROVED',
+        reason: 'Authorized correction for TC-HTTP-002 replay',
+        candidateId: 'CAND-HTTP-002',
+        candidateHash: 'HASH-HTTP-002',
+        additions: [{ lotId: lot.lotId, kg: 15 }]
+      });
+
       const payload = {
         heatId: heat.heatId,
+        candidateId: 'CAND-HTTP-002',
+        candidateHash: 'HASH-HTTP-002',
         lines: [{ lotId: lot.lotId, kg: 15 }]
       };
 
       const res1 = await makeRequest(baseUrl, {
         method: 'POST',
         path: '/api/v2/premelt/additives/deduct',
-        headers: { 'Idempotency-Key': key },
+        headers: {
+          ...operatorAuth.headers,
+          'Idempotency-Key': key
+        },
         body: payload
       });
       assert.strictEqual(res1.statusCode, 200);
@@ -115,7 +196,10 @@ async function runTests() {
       const res2 = await makeRequest(baseUrl, {
         method: 'POST',
         path: '/api/v2/premelt/additives/deduct',
-        headers: { 'Idempotency-Key': key },
+        headers: {
+          ...operatorAuth.headers,
+          'Idempotency-Key': key
+        },
         body: payload
       });
       assert.strictEqual(res2.statusCode, 200);
@@ -129,6 +213,7 @@ async function runTests() {
       const res = await makeRequest(baseUrl, {
         method: 'POST',
         path: '/api/v2/premelt/additives/deduct',
+        headers: operatorAuth.headers,
         body: {
           heatId: heat.heatId,
           lines: [{ lotId: lot.lotId, kg: 5 }]
@@ -146,7 +231,10 @@ async function runTests() {
       const res = await makeRequest(baseUrl, {
         method: 'POST',
         path: '/api/v2/premelt/additives/deduct',
-        headers: { 'Idempotency-Key': `HTTP-ERR-${Date.now()}` },
+        headers: {
+          ...operatorAuth.headers,
+          'Idempotency-Key': `HTTP-ERR-${Date.now()}`
+        },
         body: {
           heatId: heat.heatId,
           lines: [{ lotId: lot.lotId, kg: -25 }]
@@ -162,7 +250,10 @@ async function runTests() {
       const res = await makeRequest(baseUrl, {
         method: 'POST',
         path: '/api/v2/premelt/additives/deduct',
-        headers: { 'Idempotency-Key': `HTTP-404-${Date.now()}` },
+        headers: {
+          ...operatorAuth.headers,
+          'Idempotency-Key': `HTTP-404-${Date.now()}`
+        },
         body: {
           heatId: 'H-NOT-FOUND-000',
           lines: [{ lotId: lot.lotId, kg: 5 }]
@@ -178,7 +269,7 @@ async function runTests() {
       const res = await makeRequest(baseUrl, {
         method: 'POST',
         path: `/api/v2/sales/heats/${heat.heatId}/complete`,
-        headers: { 'X-Test-User-Id': 'qm1' },
+        headers: qmAuth.headers,
         body: {
           approvedBy: 'engineer_1'
           // no composition provided
@@ -195,7 +286,7 @@ async function runTests() {
       const res = await makeRequest(baseUrl, {
         method: 'POST',
         path: `/api/v2/sales/heats/${heat.heatId}/complete`,
-        headers: { 'X-Test-User-Id': 'qm1' },
+        headers: qmAuth.headers,
         body: {
           resume: true, // Gate bypass attempt
           approvedBy: 'bypasser'
@@ -212,7 +303,7 @@ async function runTests() {
       const res = await makeRequest(baseUrl, {
         method: 'GET',
         path: `/api/v2/sales/certificates/${heat.heatId}`,
-        headers: { 'X-Test-User-Id': 'qm1' }
+        headers: qmAuth.headers
       });
 
       assert.strictEqual(res.statusCode, 409);
@@ -223,7 +314,7 @@ async function runTests() {
       const res = await makeRequest(baseUrl, {
         method: 'PATCH',
         path: '/api/v2/sales/config',
-        headers: { 'X-Test-User-Id': 'admin1' },
+        headers: adminAuth.headers,
         body: {
           castingYieldPct: 75,
           returnsPct: 35 // Sum = 110%
@@ -239,15 +330,69 @@ async function runTests() {
       const res = await makeRequest(baseUrl, {
         method: 'POST',
         path: '/api/v2/premelt/demo/reset',
-        headers: { 'X-Test-User-Id': 'admin1' },
+        headers: adminAuth.headers,
         body: { adminPassword: 'AdminSecurePass123!', confirm: 'DEMO_RESET_CONFIRM' }
       });
       assert.strictEqual(res.statusCode, 403);
       process.env.ENABLE_DEMO_RESET = 'true';
     });
 
+    // Explicit anonymous-401 assertions
+    await test('TC-HTTP-011: Anonymous request to POST /additives/deduct returns 401 Unauthorized', async () => {
+      const res = await makeRequest(baseUrl, {
+        method: 'POST',
+        path: '/api/v2/premelt/additives/deduct',
+        headers: { 'Idempotency-Key': `ANON-DEDUCT-${Date.now()}` },
+        body: { heatId: 'H-ANON-001', lines: [] }
+      });
+      assert.strictEqual(res.statusCode, 401);
+      assert.strictEqual(res.data.code, 'UNAUTHORIZED');
+    });
+
+    await test('TC-HTTP-012: Anonymous request to POST /sales/heats/:heatId/complete returns 401 Unauthorized', async () => {
+      const res = await makeRequest(baseUrl, {
+        method: 'POST',
+        path: '/api/v2/sales/heats/H-ANON-002/complete',
+        body: {}
+      });
+      assert.strictEqual(res.statusCode, 401);
+      assert.strictEqual(res.data.code, 'UNAUTHORIZED');
+    });
+
+    await test('TC-HTTP-013: Anonymous request to GET /sales/certificates/:heatId returns 401 Unauthorized', async () => {
+      const res = await makeRequest(baseUrl, {
+        method: 'GET',
+        path: '/api/v2/sales/certificates/H-ANON-003'
+      });
+      assert.strictEqual(res.statusCode, 401);
+      assert.strictEqual(res.data.code, 'UNAUTHORIZED');
+    });
+
+    await test('TC-HTTP-014: Anonymous request to PATCH /sales/config returns 401 Unauthorized', async () => {
+      const res = await makeRequest(baseUrl, {
+        method: 'PATCH',
+        path: '/api/v2/sales/config',
+        body: { castingYieldPct: 80 }
+      });
+      assert.strictEqual(res.statusCode, 401);
+      assert.strictEqual(res.data.code, 'UNAUTHORIZED');
+    });
+
+    await test('TC-HTTP-015: Anonymous request to POST /premelt/demo/reset returns 401 Unauthorized', async () => {
+      const res = await makeRequest(baseUrl, {
+        method: 'POST',
+        path: '/api/v2/premelt/demo/reset',
+        body: {}
+      });
+      assert.strictEqual(res.statusCode, 401);
+      assert.strictEqual(res.data.code, 'UNAUTHORIZED');
+    });
+
   } finally {
-    server.close();
+    if (server.closeAllConnections) {
+      server.closeAllConnections();
+    }
+    await new Promise((resolve) => server.close(resolve));
   }
 
   return tests;
@@ -257,7 +402,7 @@ if (require.main === module) {
   runTests().then((results) => {
     console.log(JSON.stringify(results, null, 2));
     const failed = results.filter((r) => r.status === 'FAIL');
-    process.exit(failed.length > 0 ? 1 : 0);
+    process.exitCode = failed.length > 0 ? 1 : 0;
   });
 }
 

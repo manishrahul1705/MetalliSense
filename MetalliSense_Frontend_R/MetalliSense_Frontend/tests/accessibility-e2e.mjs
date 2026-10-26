@@ -99,11 +99,11 @@ async function run() {
     record('prefers-reduced-motion media query respected', prefersReduced === true, { prefersReduced });
 
     // 2. Keyboard Navigation & Focus Ring Visibility Check
-    await page.focus('body');
+    const firstInteractive = page.locator('a, button, input').first();
+    await firstInteractive.focus();
     let focusedCount = 0;
     const focusSamples = [];
     for (let i = 0; i < 10; i++) {
-      await page.keyboard.press('Tab');
       const info = await page.evaluate(() => {
         const el = document.activeElement;
         if (!el || el === document.body) return null;
@@ -112,6 +112,7 @@ async function run() {
         return {
           tag: el.tagName,
           id: el.id,
+          text: (el.textContent || '').trim().slice(0, 30),
           hasVisibleFocus: style.outlineStyle !== 'none' || style.boxShadow !== 'none' || style.borderColor !== '',
           visible: rect.width > 0 && rect.height > 0
         };
@@ -120,8 +121,9 @@ async function run() {
         focusedCount++;
         focusSamples.push(info);
       }
+      await page.keyboard.press('Tab');
     }
-    record('Sequential keyboard navigation provides visible focus', focusedCount >= 3, { focusedElements: focusedCount, samples: focusSamples.slice(0, 5) });
+    record('Sequential keyboard navigation provides visible focus', focusedCount >= 3, { focusedElements: focusedCount, samples: focusSamples });
 
     // 3. Dialog Modal Lifecycle & Focus Trapping Check
     await gotoRoute('grades');
@@ -146,10 +148,11 @@ async function run() {
     record('Modal dialog role, aria-modal, and accessible labeling', dialogState.found && dialogState.ariaModal === 'true' && !!dialogState.ariaLabelledby, dialogState);
 
     // Test Tab trapping inside modal
+    await page.locator('[role="dialog"]').locator('button, input, select').first().focus();
     await page.keyboard.press('Tab');
     const trappedInside = await page.evaluate(() => {
       const dialog = document.querySelector('[role="dialog"]');
-      return dialog && dialog.contains(document.activeElement);
+      return !!(dialog && dialog.contains(document.activeElement));
     });
     record('Focus trapped within modal container', trappedInside === true, { trappedInside });
 
@@ -160,8 +163,13 @@ async function run() {
     record('Escape key dismisses active modal dialog', dialogClosed === true, { dialogClosed });
 
     // 4. Color Contrast Compliance (WCAG 2.1 AA)
+    await gotoRoute('dashboard');
+    await page.waitForSelector('h1, h2, nav', { state: 'visible', timeout: 10000 });
+    await page.waitForTimeout(500);
+
     const contrastMetrics = await page.evaluate(() => {
       function parseRgb(colorStr) {
+        if (!colorStr) return [0, 0, 0, 1];
         const match = colorStr.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
         if (!match) return [0, 0, 0, 1];
         return [parseInt(match[1]), parseInt(match[2]), parseInt(match[3]), match[4] !== undefined ? parseFloat(match[4]) : 1];
@@ -179,33 +187,63 @@ async function run() {
         return (Math.max(lum1, lum2) + 0.05) / (Math.min(lum1, lum2) + 0.05);
       }
 
-      const elements = Array.from(document.querySelectorAll('button, h1, h2, h3, p, span')).filter(el => {
-        const t = el.textContent.trim();
-        return t.length > 2 && t.length < 60 && el.offsetParent !== null;
-      }).slice(0, 40);
+      function extractEffectiveBg(el) {
+        let p = el;
+        while (p) {
+          const comp = window.getComputedStyle(p);
+          const bg = comp.backgroundColor;
+          const bgImg = comp.backgroundImage || '';
+
+          // If element or ancestor has gradient background
+          if (bgImg.includes('gradient')) {
+            const rgbMatches = bgImg.match(/rgba?\(\d+,\s*\d+,\s*\d+(?:,\s*[\d.]+)?\)/g);
+            if (rgbMatches && rgbMatches.length > 0) {
+              return { rgb: parseRgb(rgbMatches[0]), source: 'gradient' };
+            }
+          }
+
+          if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
+            return { rgb: parseRgb(bg), source: bg };
+          }
+          p = p.parentElement;
+        }
+        return { rgb: [255, 255, 255, 1], source: 'default-white' };
+      }
+
+      const elements = Array.from(document.querySelectorAll('button, h1, h2, h3, p, span, a')).filter(el => {
+        const t = (el.textContent || '').trim();
+        const rect = el.getBoundingClientRect();
+        return t.length > 2 && t.length < 60 && rect.width > 0 && rect.height > 0;
+      }).slice(0, 50);
 
       let passCount = 0;
       const details = [];
       for (const el of elements) {
         const s = window.getComputedStyle(el);
         const fg = parseRgb(s.color);
-        let bgStyle = s.backgroundColor;
-        let p = el;
-        while (p && (bgStyle === 'rgba(0, 0, 0, 0)' || bgStyle === 'transparent')) {
-          p = p.parentElement;
-          if (p) bgStyle = window.getComputedStyle(p).backgroundColor;
-        }
-        const bg = parseRgb(bgStyle || 'rgb(255, 255, 255)');
+        const { rgb: bg, source: bgSource } = extractEffectiveBg(el);
         const ratio = contrastRatio(fg, bg);
-        const ok = ratio >= 3.0; // Meets WCAG AA large / component threshold
+        const fontSize = parseFloat(s.fontSize) || 14;
+        const fontWeight = parseInt(s.fontWeight) || 400;
+        const isLarge = fontSize >= 24 || (fontSize >= 18.66 && fontWeight >= 700);
+        const isControl = el.tagName === 'BUTTON' || el.tagName === 'A';
+        const threshold = (isLarge || isControl) ? 3.0 : 4.5;
+        const ok = ratio >= threshold;
         if (ok) passCount++;
-        details.push({ tag: el.tagName, text: el.textContent.trim().slice(0, 20), ratio: Number(ratio.toFixed(2)), ok });
+        details.push({
+          tag: el.tagName,
+          text: el.textContent.trim().slice(0, 25),
+          ratio: Number(ratio.toFixed(2)),
+          threshold,
+          bgSource,
+          ok
+        });
       }
 
-      return { total: elements.length, passCount, complianceRate: elements.length ? (passCount / elements.length) : 1, details: details.slice(0, 5) };
+      return { total: elements.length, passCount, complianceRate: elements.length ? (passCount / elements.length) : 1, details: details.slice(0, 15) };
     });
 
-    record('WCAG AA Color Contrast Verification across UI text and controls', contrastMetrics.complianceRate >= 0.80, contrastMetrics);
+    record('WCAG AA Color Contrast Verification across UI text and controls', contrastMetrics.complianceRate >= 0.85, contrastMetrics);
 
     // 5. Role-Aware Semantic Structure Check
     await gotoRoute('premelt-gate');

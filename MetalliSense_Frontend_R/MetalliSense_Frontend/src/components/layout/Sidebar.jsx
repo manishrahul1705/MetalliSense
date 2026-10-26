@@ -362,7 +362,7 @@ const Sidebar = ({ setRunTour }) => {
                       className={({ isActive }) =>
                         `w-full text-left flex items-center gap-3 p-2.5 rounded-lg text-sm font-medium transition-all duration-200  ${
                           isActive
-                            ? "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-lg shadow-emerald-500/25"
+                            ? "bg-gradient-to-r from-emerald-700 to-emerald-800 text-white shadow-lg shadow-emerald-800/25"
                             : "text-metal-700 hover:bg-emerald-50 hover:text-emerald-700"
                         }`
                       }

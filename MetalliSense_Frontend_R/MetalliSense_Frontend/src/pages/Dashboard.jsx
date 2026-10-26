@@ -185,7 +185,7 @@ const Dashboard = () => {
               <p className="text-3xl font-bold text-slate-800 mb-1">
                 {stats.totalGrades}
               </p>
-              <p className="text-xs text-emerald-600 font-medium">
+              <p className="text-xs text-emerald-800 font-semibold">
                 Grade specifications defined
               </p>
             </div>
@@ -216,7 +216,7 @@ const Dashboard = () => {
                   : visualizationData?.overview?.totalSamples?.toLocaleString() ||
                     "0"}
               </p>
-              <p className="text-xs text-emerald-600 font-medium">
+              <p className="text-xs text-emerald-800 font-semibold">
                 Total training data samples
               </p>
             </div>
@@ -247,7 +247,7 @@ const Dashboard = () => {
                   : visualizationData?.overview?.deviatedSamples?.toLocaleString() ||
                     "0"}
               </p>
-              <p className="text-xs text-emerald-600 font-medium">
+              <p className="text-xs text-emerald-800 font-semibold">
                 Samples with deviations
               </p>
             </div>

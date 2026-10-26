@@ -19,7 +19,7 @@ const Button = ({
       "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:from-emerald-600 hover:to-emerald-700 hover:shadow-lg focus:ring-emerald-500 shadow-md",
     secondary: "bg-gradient-dark text-white hover:shadow-lg focus:ring-metal-600",
     danger: "bg-gradient-to-r from-red-600 to-red-700 text-white hover:shadow-lg focus:ring-red-500",
-    success: "bg-gradient-to-r from-primary-500 to-primary-600 text-white hover:shadow-metal-lg focus:ring-primary-500",
+    success: "bg-gradient-to-r from-emerald-700 to-teal-800 text-white hover:shadow-metal-lg focus:ring-emerald-700",
     outline:
       "border-2 border-primary-600 text-primary-600 hover:bg-primary-50 focus:ring-primary-500 bg-white",
     ghost: "text-metal-700 hover:bg-metal-100 focus:ring-metal-500",
