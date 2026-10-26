@@ -95,8 +95,11 @@ class GunService {
   }
 
   /** Start an inspection. Returns at once; readings stream into this.live. */
-  async startInspection({ lotId, device = 'XRF', pieces, surfacePrepared = false, inspector = 'Yard inspector' }) {
-    const lot = store.getLot(lotId);
+  async startInspection({ lotId, device = 'XRF', pieces, surfacePrepared = false, inspector = 'Yard inspector' } = {}) {
+    if (!lotId || typeof lotId !== 'string' || !lotId.trim()) {
+      throw Object.assign(new Error('lotId is required and must be a valid string'), { status: 400 });
+    }
+    const lot = store.getLot(lotId.trim());
     if (!lot) throw Object.assign(new Error(`Lot ${lotId} not found`), { status: 404 });
     if (!['STEEL_SCRAP', 'CI_SCRAP'].includes(lot.materialType)) {
       throw Object.assign(new Error('Yard gun inspection is for scrap lots. Sponge iron goes to the QA lab.'), { status: 400 });

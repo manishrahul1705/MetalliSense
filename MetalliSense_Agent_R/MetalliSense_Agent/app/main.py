@@ -3,7 +3,8 @@
 MetalliSense AI Service - FastAPI Application
 Main entry point for the AI Intelligence Layer
 """
-from fastapi import FastAPI, HTTPException, status, File, UploadFile
+from fastapi import FastAPI, HTTPException, status, File, UploadFile, Request
+import os
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 import uvicorn
@@ -75,6 +76,41 @@ app.add_middleware(
     expose_headers=["X-TTS-Provider"],
     allow_headers=["*"],
 )
+
+
+# Scoped internal service authentication middleware
+INTERNAL_SERVICE_KEY = os.getenv("METALLISENSE_INTERNAL_SERVICE_KEY", "metallisense-internal-service-secret-key-2026")
+
+@app.middleware("http")
+async def verify_internal_service_auth(request: Request, call_next):
+    public_paths = {"/", "/health", "/docs", "/redoc", "/openapi.json"}
+    if request.url.path in public_paths or request.method == "OPTIONS":
+        return await call_next(request)
+    
+    token = request.headers.get("X-Internal-Service-Key")
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = token or auth_header[7:].strip()
+    
+    if not token:
+        return JSONResponse(
+            status_code=401,
+            content={
+                "status": "fail",
+                "code": "UNAUTHORIZED_SERVICE",
+                "message": "Direct access rejected: internal service authentication required."
+            }
+        )
+    if token != INTERNAL_SERVICE_KEY:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "status": "fail",
+                "code": "FORBIDDEN_SERVICE",
+                "message": "Invalid internal service token."
+            }
+        )
+    return await call_next(request)
 
 # Global predictors (lazy loaded)
 anomaly_predictor = None

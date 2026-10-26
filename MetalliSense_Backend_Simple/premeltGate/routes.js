@@ -29,9 +29,19 @@ const wrap = (fn) => async (req, res) => {
     const data = await fn(req, res);
     if (!res.headersSent) res.json({ status: 'success', data });
   } catch (e) {
-    const status = e.status || 500;
-    const { message, status: _s, stack, ...extra } = e;
-    res.status(status).json({ status: status < 500 ? 'fail' : 'error', message, ...extra });
+    const status = (typeof e.status === 'number' && e.status >= 400 && e.status < 600)
+      ? e.status
+      : (e.code === 'ERR_INVALID_ARG_TYPE' || e.name === 'TypeError' || e.name === 'CsvError') ? 400 : 500;
+    const isClientError = status < 500;
+    const isInternalArgType = e.code === 'ERR_INVALID_ARG_TYPE' || e.name === 'TypeError' || e.name === 'CsvError';
+    const message = isClientError
+      ? (!isInternalArgType && e.message && !e.message.includes('SQLite') ? e.message : 'Invalid request parameters.')
+      : 'An unexpected internal error occurred.';
+    const { message: _m, status: _s, stack: _st, ...extra } = e;
+    if (isInternalArgType) {
+      delete extra.code;
+    }
+    res.status(status).json({ status: isClientError ? 'fail' : 'error', message, ...extra });
   }
 };
 const bad = (status, message, extra = {}) => Object.assign(new Error(message), { status, ...extra });

@@ -40,6 +40,7 @@ function log(type, ref, by, detail) {
 
 // ------------------------------------------------------------------ lots
 function availableKg(lotId) {
+  if (!lotId || typeof lotId !== 'string') return 0;
   const db = getDb();
   const row = db.prepare('SELECT COALESCE(SUM(kg_scaled), 0) AS total_grams FROM movements WHERE lot_id = ?').get(lotId);
   const grams = Number(row?.total_grams || 0);
@@ -94,8 +95,9 @@ function view(lot) {
 }
 
 function getLot(lotId) {
+  if (!lotId || typeof lotId !== 'string' || !lotId.trim()) return null;
   const db = getDb();
-  const row = db.prepare('SELECT * FROM lots WHERE lot_id = ?').get(lotId);
+  const row = db.prepare('SELECT * FROM lots WHERE lot_id = ?').get(lotId.trim());
   return parseLotRow(row);
 }
 
@@ -319,6 +321,7 @@ function listMovements(lotId) {
 // ------------------------------------------------------------------ QA & Gun
 const qa = {
   get(id) {
+    if (!id || typeof id !== 'string') return null;
     const db = getDb();
     const r = db.prepare('SELECT * FROM qa_results WHERE qa_id = ?').get(id);
     if (!r) return null;
@@ -379,6 +382,7 @@ const qa = {
 
 const sessions = {
   get(id) {
+    if (!id || typeof id !== 'string') return null;
     const db = getDb();
     const r = db.prepare('SELECT * FROM gun_sessions WHERE session_id = ?').get(id);
     if (!r) return null;
@@ -421,6 +425,7 @@ const sessions = {
 // ------------------------------------------------------------------ heats
 const heats = {
   get(id) {
+    if (!id || typeof id !== 'string') return null;
     const db = getDb();
     const row = db.prepare('SELECT * FROM heats WHERE heat_id = ?').get(id);
     if (!row) return null;

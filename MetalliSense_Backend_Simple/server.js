@@ -398,6 +398,9 @@ app.use('/api/v1/spectrometer', opcRouter);
 
 // ======================= AI SERVICE PROXY (:8000) =======================
 const axios = require('axios');
+const INTERNAL_SERVICE_KEY = process.env.METALLISENSE_INTERNAL_SERVICE_KEY || 'metallisense-internal-service-secret-key-2026';
+axios.defaults.headers.common['X-Internal-Service-Key'] = INTERNAL_SERVICE_KEY;
+
 const AI_URL = {
   toString() { return process.env.AI_SERVICE_URL || 'http://127.0.0.1:8000'; }
 };
@@ -407,7 +410,16 @@ const AGENT_URL = {
 
 async function proxy(res, method, url, data) {
   try {
-    const response = await axios({ method, url, data, timeout: 30000 });
+    const response = await axios({
+      method,
+      url,
+      data,
+      headers: {
+        'X-Internal-Service-Key': INTERNAL_SERVICE_KEY,
+        'Authorization': `Bearer ${INTERNAL_SERVICE_KEY}`
+      },
+      timeout: 30000
+    });
     res.status(response.status).json(response.data);
   } catch (err) {
     if (err.response) {

@@ -25,19 +25,27 @@ function num(v) {
 }
 
 function parseCsv(csvText) {
-  const records = parse(csvText, { columns: true, trim: true, skip_empty_lines: true });
+  if (typeof csvText !== 'string' || !csvText.trim()) {
+    throw Object.assign(new Error('CSV payload must be a non-empty string'), { status: 400 });
+  }
+  let records;
+  try {
+    records = parse(csvText, { columns: true, trim: true, skip_empty_lines: true });
+  } catch (err) {
+    throw Object.assign(new Error('Malformed CSV format: ' + err.message), { status: 400 });
+  }
   return records.map((r) => {
     const values = {};
     ELEMENTS.forEach((el) => { values[el] = num(r[el]); });
     return {
-      timestamp: r.timestamp,
-      deviceId: r.device_id,
-      deviceType: r.device_type,
-      mode: r.mode,
-      lotId: r.lot_id,
-      pieceNo: Number(r.piece_no),
-      surfaceOk: String(r.surface_ok) === '1',
-      testSeconds: Number(r.test_seconds) || null,
+      timestamp: r.timestamp || new Date().toISOString(),
+      deviceId: r.device_id || r.deviceId || 'UNKNOWN_GUN',
+      deviceType: r.device_type || r.deviceType || 'XRF',
+      mode: r.mode || 'Scrap',
+      lotId: r.lot_id || r.lotId || r.LOT_ID || null,
+      pieceNo: Number(r.piece_no || r.pieceNo || 1),
+      surfaceOk: String(r.surface_ok || r.surfaceOk) === '1' || r.surface_ok === true,
+      testSeconds: Number(r.test_seconds || r.testSeconds) || null,
       values,
       deviceFlags: r.flags ? String(r.flags).split('|').filter(Boolean) : [],
     };
@@ -115,8 +123,9 @@ function ingestCsv(csvText, meta = {}) {
   const readings = parseCsv(csvText).map((r) => ({ ...r, flags: flagPiece(r) }));
   if (!readings.length) throw Object.assign(new Error('CSV contains no readings'), { status: 400 });
 
-  const lotIds = [...new Set(readings.map((r) => r.lotId))];
-  if (lotIds.length !== 1) throw Object.assign(new Error('One session must cover exactly one lot'), { status: 400 });
+  const lotIds = [...new Set(readings.map((r) => r.lotId).filter(Boolean))];
+  if (lotIds.length === 0) throw Object.assign(new Error('CSV must contain a valid lot_id column and non-empty value'), { status: 400 });
+  if (lotIds.length > 1) throw Object.assign(new Error('One session must cover exactly one lot'), { status: 400 });
   const lot = store.getLot(lotIds[0]);
   if (!lot) throw Object.assign(new Error(`Lot ${lotIds[0]} not found`), { status: 404 });
   if (!SCRAP_TYPES.includes(lot.materialType)) throw Object.assign(new Error(`${lot.lotId} is ${lot.materialType}; yard gun inspection is for scrap lots`), { status: 400 });

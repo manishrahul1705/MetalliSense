@@ -12,6 +12,8 @@
  */
 const crypto = require('crypto');
 const axios = require('axios');
+const INTERNAL_SERVICE_KEY = process.env.METALLISENSE_INTERNAL_SERVICE_KEY || 'metallisense-internal-service-secret-key-2026';
+axios.defaults.headers.common['X-Internal-Service-Key'] = INTERNAL_SERVICE_KEY;
 const store = require('./store');
 const gradeStore = require('../gradeSpecStore');
 const additives = require('./additives');

@@ -5,6 +5,8 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
+const INTERNAL_SERVICE_KEY = process.env.METALLISENSE_INTERNAL_SERVICE_KEY || 'metallisense-internal-service-secret-key-2026';
+axios.defaults.headers.common['X-Internal-Service-Key'] = INTERNAL_SERVICE_KEY;
 const { requireAuth, requireRole } = require('./premeltGate/authMiddleware');
 
 const AI_URL = {

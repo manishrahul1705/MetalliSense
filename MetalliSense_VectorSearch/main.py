@@ -24,10 +24,14 @@ import json
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sentence_transformers import SentenceTransformer
+try:
+    from sentence_transformers import SentenceTransformer
+except ImportError:
+    SentenceTransformer = None
 
 import vector_store
 
@@ -38,6 +42,9 @@ EMBEDDING_DIM = 384  # all-MiniLM-L6-v2 output size
 
 TRAINING_COLLECTION = "metallisense_training_data"
 GRADE_COLLECTION = "metallisense_grades"
+
+
+
 
 state = {"model": None, "indexed_count": 0}
 
@@ -130,7 +137,10 @@ def build_index():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("Loading embedding model:", EMBEDDING_MODEL)
-    state["model"] = SentenceTransformer(EMBEDDING_MODEL)
+    if SentenceTransformer is not None:
+        state["model"] = SentenceTransformer(EMBEDDING_MODEL)
+    else:
+        print("[WARN] sentence_transformers not installed -- running in fallback mode")
 
     print(f"Vector store backend: {vector_store.backend_name()}")
 
@@ -150,6 +160,40 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Scoped internal service authentication middleware
+INTERNAL_SERVICE_KEY = os.getenv("METALLISENSE_INTERNAL_SERVICE_KEY", "metallisense-internal-service-secret-key-2026")
+
+@app.middleware("http")
+async def verify_internal_service_auth(request: Request, call_next):
+    public_paths = {"/", "/health", "/docs", "/redoc", "/openapi.json"}
+    if request.url.path in public_paths or request.method == "OPTIONS":
+        return await call_next(request)
+    
+    token = request.headers.get("X-Internal-Service-Key")
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = token or auth_header[7:].strip()
+    
+    if not token:
+        return JSONResponse(
+            status_code=401,
+            content={
+                "status": "fail",
+                "code": "UNAUTHORIZED_SERVICE",
+                "message": "Direct access rejected: internal service authentication required."
+            }
+        )
+    if token != INTERNAL_SERVICE_KEY:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "status": "fail",
+                "code": "FORBIDDEN_SERVICE",
+                "message": "Invalid internal service token."
+            }
+        )
+    return await call_next(request)
 
 
 class SearchRequest(BaseModel):

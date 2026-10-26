@@ -286,6 +286,111 @@ async function runTests() {
   const lotsAfter = db.prepare('SELECT count(*) as c FROM lots').get().c;
   check('Zero database mutation: lot count untouched following rejected RBAC attempt', lotsBefore === lotsAfter);
 
+  // TEST SUITE 9: Gun Inspection & Ingest Safe Validation (Fix for 500 ERR_INVALID_ARG_TYPE)
+  console.log('\n--- Section 9: Gun Inspect & Ingest-CSV Validation Hardening ---');
+  const premeltStore = require('../store');
+  premeltStore.addLot({
+    lotId: 'LOT-GUN-TEST-001',
+    materialType: 'STEEL_SCRAP',
+    supplier: 'ScrapYardAlpha',
+    receivedKg: 15000,
+  }, 'audit_operator');
+
+  // 9a. Inspect with missing lotId returns 400 Bad Request, NOT 500 ERR_INVALID_ARG_TYPE
+  const inspectEmpty = await request('POST', '/api/v2/premelt/gun/inspect', {
+    headers: { Cookie: cookieHdr(personas['OPERATOR'].cookies), 'X-CSRF-Token': personas['OPERATOR'].csrf },
+    body: {}
+  });
+  check('POST /gun/inspect with empty body fails safely with 400 (not 500)', inspectEmpty.status === 400 && !inspectEmpty.raw.includes('ERR_INVALID_ARG_TYPE') && !inspectEmpty.raw.includes('SQLite'));
+
+  // 9b. Inspect with non-string lotId returns 400
+  const inspectNum = await request('POST', '/api/v2/premelt/gun/inspect', {
+    headers: { Cookie: cookieHdr(personas['OPERATOR'].cookies), 'X-CSRF-Token': personas['OPERATOR'].csrf },
+    body: { lotId: 12345 }
+  });
+  check('POST /gun/inspect with numeric lotId returns 400', inspectNum.status === 400);
+
+  // 9c. Inspect with valid scrap lot returns 200
+  const inspectValid = await request('POST', '/api/v2/premelt/gun/inspect', {
+    headers: { Cookie: cookieHdr(personas['OPERATOR'].cookies), 'X-CSRF-Token': personas['OPERATOR'].csrf },
+    body: { lotId: 'LOT-GUN-TEST-001' }
+  });
+  check('POST /gun/inspect with valid lotId starts inspection session (200 OK)', inspectValid.status === 200 && inspectValid.data?.data?.lotId === 'LOT-GUN-TEST-001');
+
+  // 9d. Ingest CSV with missing body returns 400
+  const ingestEmpty = await request('POST', '/api/v2/premelt/gun/ingest-csv', {
+    headers: { Cookie: cookieHdr(personas['OPERATOR'].cookies), 'X-CSRF-Token': personas['OPERATOR'].csrf },
+    body: {}
+  });
+  check('POST /gun/ingest-csv with empty body fails safely with 400', ingestEmpty.status === 400 && !ingestEmpty.raw.includes('ERR_INVALID_ARG_TYPE'));
+
+  // 9e. Ingest CSV with malformed unparseable CSV returns 400
+  const ingestMalformed = await request('POST', '/api/v2/premelt/gun/ingest-csv', {
+    headers: { Cookie: cookieHdr(personas['OPERATOR'].cookies), 'X-CSRF-Token': personas['OPERATOR'].csrf },
+    body: { csv: 'col1,col2\n"unclosed quote,value2\nval3' }
+  });
+  check('POST /gun/ingest-csv with malformed CSV format returns 400', ingestMalformed.status === 400 && !ingestMalformed.raw.includes('SQLite'));
+
+  // 9f. Ingest CSV with missing lot_id column returns 400
+  const ingestNoLot = await request('POST', '/api/v2/premelt/gun/ingest-csv', {
+    headers: { Cookie: cookieHdr(personas['OPERATOR'].cookies), 'X-CSRF-Token': personas['OPERATOR'].csrf },
+    body: { csv: 'piece_no,device_id\n1,GUN-01' }
+  });
+  check('POST /gun/ingest-csv without lot_id returns 400', ingestNoLot.status === 400);
+
+  // 9g. Ingest CSV with valid scrap fixture returns 200 and evaluation decision
+  const validCsvFixture = [
+    'piece_no,lot_id,device_id,device_type,mode,surface_ok,test_seconds,C,Si,Mn,P,S,Cr,Ni,Mo,Cu,V,Ti,Al,flags',
+    '1,LOT-GUN-TEST-001,GUN-01,XRF,Scrap,1,15,0.25,0.40,0.65,0.025,0.025,0.15,0.10,0.02,0.15,0.01,0.01,0.02,',
+    '2,LOT-GUN-TEST-001,GUN-01,XRF,Scrap,1,15,0.26,0.39,0.64,0.024,0.026,0.14,0.11,0.02,0.14,0.01,0.01,0.02,',
+    '3,LOT-GUN-TEST-001,GUN-01,XRF,Scrap,1,15,0.24,0.41,0.66,0.026,0.024,0.16,0.10,0.02,0.15,0.01,0.01,0.02,',
+    '4,LOT-GUN-TEST-001,GUN-01,XRF,Scrap,1,15,0.25,0.40,0.65,0.025,0.025,0.15,0.10,0.02,0.15,0.01,0.01,0.02,',
+    '5,LOT-GUN-TEST-001,GUN-01,XRF,Scrap,1,15,0.25,0.40,0.65,0.025,0.025,0.15,0.10,0.02,0.15,0.01,0.01,0.02,',
+    '6,LOT-GUN-TEST-001,GUN-01,XRF,Scrap,1,15,0.25,0.40,0.65,0.025,0.025,0.15,0.10,0.02,0.15,0.01,0.01,0.02,',
+    '7,LOT-GUN-TEST-001,GUN-01,XRF,Scrap,1,15,0.25,0.40,0.65,0.025,0.025,0.15,0.10,0.02,0.15,0.01,0.01,0.02,',
+    '8,LOT-GUN-TEST-001,GUN-01,XRF,Scrap,1,15,0.25,0.40,0.65,0.025,0.025,0.15,0.10,0.02,0.15,0.01,0.01,0.02,',
+    '9,LOT-GUN-TEST-001,GUN-01,XRF,Scrap,1,15,0.25,0.40,0.65,0.025,0.025,0.15,0.10,0.02,0.15,0.01,0.01,0.02,',
+    '10,LOT-GUN-TEST-001,GUN-01,XRF,Scrap,1,15,0.25,0.40,0.65,0.025,0.025,0.15,0.10,0.02,0.15,0.01,0.01,0.02,'
+  ].join('\n');
+
+  const ingestValid = await request('POST', '/api/v2/premelt/gun/ingest-csv', {
+    headers: { Cookie: cookieHdr(personas['OPERATOR'].cookies), 'X-CSRF-Token': personas['OPERATOR'].csrf },
+    body: { csv: validCsvFixture }
+  });
+  check('POST /gun/ingest-csv with valid fixture returns 200 and evaluation decision', ingestValid.status === 200 && ingestValid.data?.data?.decision?.status === 'RELEASED');
+
+  // TEST SUITE 10: Reauth Endpoint Contract (Authenticated Contract, NOT Public)
+  console.log('\n--- Section 10: Reauth Contract Verification ---');
+  // 10a. Anonymous reauth is rejected with 401 UNAUTHORIZED
+  const anonReauth = await request('POST', '/api/v2/auth/reauth', { body: { password: 'AdminSecurePass123!' } });
+  check('POST /api/v2/auth/reauth rejects anonymous caller with 401 UNAUTHORIZED', anonReauth.status === 401 && anonReauth.data?.code === 'UNAUTHORIZED');
+
+  // 10b. Authenticated reauth with incorrect password returns 401 REAUTH_FAILED
+  const badReauth = await request('POST', '/api/v2/auth/reauth', {
+    headers: { Cookie: cookieHdr(personas['ADMIN'].cookies), 'X-CSRF-Token': personas['ADMIN'].csrf },
+    body: { password: 'WrongPassword999!' }
+  });
+  check('POST /api/v2/auth/reauth with incorrect password returns 401 REAUTH_FAILED', badReauth.status === 401 && badReauth.data?.code === 'REAUTH_FAILED');
+
+  // 10c. Authenticated reauth with valid password succeeds (200 OK)
+  const goodReauth = await request('POST', '/api/v2/auth/reauth', {
+    headers: { Cookie: cookieHdr(personas['ADMIN'].cookies), 'X-CSRF-Token': personas['ADMIN'].csrf },
+    body: { password: 'AdminSecurePass123!' }
+  });
+  check('POST /api/v2/auth/reauth with correct password returns 200 OK', goodReauth.status === 200 && goodReauth.data?.status === 'success');
+
+  // TEST SUITE 11: Gateway Outgoing Upstream Scoped Service Authentication
+  console.log('\n--- Section 11: Gateway Upstream Scoped Service Header Propagation ---');
+  let lastUpstreamHeader = null;
+  upstreamStubServer.once('request', (req) => {
+    lastUpstreamHeader = req.headers['x-internal-service-key'];
+  });
+  await request('POST', '/api/v2/vector/reindex', {
+    headers: { Cookie: cookieHdr(personas['ADMIN'].cookies), 'X-CSRF-Token': personas['ADMIN'].csrf },
+    body: {}
+  });
+  check('Gateway proxies attach scoped X-Internal-Service-Key to upstream requests', lastUpstreamHeader === 'metallisense-internal-service-secret-key-2026');
+
   server.close();
   upstreamStubServer.close();
 
