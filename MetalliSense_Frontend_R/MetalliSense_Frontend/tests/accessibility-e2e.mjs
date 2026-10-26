@@ -68,7 +68,21 @@ async function run() {
 
     browser = await chromium.launch({ headless: true });
     const context = await browser.newContext();
+    await context.addCookies([
+      { name: 'metallisense_session', value: 'authenticated-audit-session-token', domain: '127.0.0.1', path: '/' },
+      { name: 'metallisense_csrf', value: 'csrf-audit-token-secret-2026', domain: '127.0.0.1', path: '/' }
+    ]);
+
     const page = await context.newPage();
+
+    await page.goto(`${BASE_URL}/login`);
+    await page.evaluate(() => {
+      sessionStorage.setItem('metallisense_user', JSON.stringify({
+        username: 'qa1',
+        role: 'QA_ANALYST',
+        displayName: 'QA Analyst 1'
+      }));
+    });
 
     // 1. Reduced Motion Emulation Check
     await page.emulateMedia({ reducedMotion: 'reduce' });
