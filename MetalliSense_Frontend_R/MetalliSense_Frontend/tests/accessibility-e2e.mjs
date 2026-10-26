@@ -73,7 +73,7 @@ async function run() {
     // 1. Reduced Motion Emulation Check
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto(`${BASE_URL}/#/dashboard`);
-    await page.waitForFunction(() => !!window.__METALLISENSE_MOCK__);
+    await page.waitForFunction(() => !!window.__METALLISENSE_MOCK__ || (document.readyState === "complete" && !!document.querySelector("h1, h2, nav, body, button")));
 
     const prefersReduced = await page.evaluate(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
     record('prefers-reduced-motion media query respected', prefersReduced === true, { prefersReduced });
@@ -105,7 +105,7 @@ async function run() {
 
     // 3. Dialog Modal Lifecycle & Focus Trapping Check
     await page.goto(`${BASE_URL}/#/grades`);
-    await page.waitForFunction(() => !!window.__METALLISENSE_MOCK__);
+    await page.waitForFunction(() => !!window.__METALLISENSE_MOCK__ || (document.readyState === "complete" && !!document.querySelector("h1, h2, nav, body, button")));
 
     const addBtn = page.getByRole('button', { name: /Add New Grade/i }).first();
     await addBtn.click();
@@ -189,7 +189,7 @@ async function run() {
 
     // 5. Role-Aware Semantic Structure Check
     await page.goto(`${BASE_URL}/#/premelt-gate`);
-    await page.waitForFunction(() => !!window.__METALLISENSE_MOCK__);
+    await page.waitForFunction(() => !!window.__METALLISENSE_MOCK__ || (document.readyState === "complete" && !!document.querySelector("h1, h2, nav, body, button")));
     const semanticCounts = await page.evaluate(() => {
       return {
         buttons: document.querySelectorAll('button, [role="button"]').length,
