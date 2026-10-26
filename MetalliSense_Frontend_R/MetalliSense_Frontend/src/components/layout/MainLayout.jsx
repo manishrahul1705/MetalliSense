@@ -92,9 +92,9 @@ const MainLayout = () => {
         }}
       />
       <Sidebar setRunTour={setRunTour} />
-      <div className="flex-1 ml-72 flex flex-col overflow-hidden">
+      <div className="flex-1 ml-0 sm:ml-72 flex flex-col overflow-hidden min-w-0">
         <TopBar title={title} />
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 min-w-0">
           <Outlet />
         </main>
       </div>

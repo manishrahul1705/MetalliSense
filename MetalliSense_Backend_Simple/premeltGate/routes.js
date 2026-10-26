@@ -172,7 +172,10 @@ router.post('/additives/deduct', requireAuth, requireRole('OPERATOR', 'METALLURG
     heatId: req.body?.heatId,
     idempotencyKey,
     by: actorName,
-    note: req.body?.note
+    note: req.body?.note,
+    candidateId: req.body?.candidateId,
+    candidateHash: req.body?.candidateHash,
+    requireApproval: true
   });
   return result.data;
 }));
@@ -254,10 +257,16 @@ router.post('/corrections/approve', requireAuth, requireRole('METALLURGIST', 'QU
     }
   }
 
-  // 5. Maker-checker separation: approver cannot be the heat planner
+  // 5. Maker-checker separation: approver cannot be the heat planner or candidate maker
   const approverId = req.user ? (req.user.userId || req.user.username) : 'UNKNOWN';
-  if (heat.planned_by && heat.planned_by === approverId) {
-    throw bad(403, 'Maker-checker violation: Heat planner cannot approve their own alloy correction candidate', {
+  const approverUsername = req.user?.username || approverId;
+  const effectiveMakerId = req.body?.makerId || heat.planned_by || 'SYSTEM';
+  if (
+    effectiveMakerId &&
+    (effectiveMakerId.toLowerCase() === approverId.toLowerCase() ||
+     effectiveMakerId.toLowerCase() === approverUsername.toLowerCase())
+  ) {
+    throw bad(403, 'Maker-checker violation: Heat planner or candidate maker cannot approve their own alloy correction candidate', {
       code: 'MAKER_CHECKER_VIOLATION'
     });
   }
@@ -267,10 +276,15 @@ router.post('/corrections/approve', requireAuth, requireRole('METALLURGIST', 'QU
     entityType: 'ALLOY_CORRECTION',
     entityId: heatId,
     entityVersion: expectedHeatVersion,
-    makerId: heat.planned_by || 'SYSTEM',
+    makerId: effectiveMakerId,
     checkerId: approverId,
     decision: 'APPROVED',
-    reason: `Approved candidate ${candidateId} (hash ${candidateHash.slice(0, 8)}) for heat ${heatId} v${expectedHeatVersion} with evidence ${evidenceVersion || 'NONE'}`
+    reason: `Approved candidate ${candidateId} (hash ${candidateHash.slice(0, 8)}) for heat ${heatId} v${expectedHeatVersion} with evidence ${evidenceVersion || 'NONE'}`,
+    candidateHash,
+    candidateId,
+    additions,
+    evidenceVersion: evidenceVersion || latestEv?.sample_id || null,
+    specVersion: specVersion || '1.0'
   });
 
   return {

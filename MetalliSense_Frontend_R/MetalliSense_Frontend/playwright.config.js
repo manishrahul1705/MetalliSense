@@ -1,2 +1,2 @@
-﻿import { defineConfig } from '@playwright/test';
-export default defineConfig({testDir:'./tests',testMatch:'mock-e2e.spec.js',timeout:180000,workers:1,use:{baseURL:'http://127.0.0.1:4179',channel:'chrome',headless:true,trace:'retain-on-failure'},webServer:{command:'node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 4179 --strictPort',url:'http://127.0.0.1:4179',reuseExistingServer:false}});
+import { defineConfig } from '@playwright/test';
+export default defineConfig({testDir:'./tests',testMatch:'mock-e2e.spec.js',timeout:300000,workers:1,use:{baseURL:'http://127.0.0.1:4179',channel:'chrome',headless:true,trace:'retain-on-failure'},webServer:{command:'node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 4179 --strictPort',url:'http://127.0.0.1:4179',reuseExistingServer:false}});

@@ -366,6 +366,16 @@ const MIGRATIONS = [
       try { db.exec('ALTER TABLE evidence ADD COLUMN sample_id TEXT;'); } catch (_) {}
       try { db.exec('ALTER TABLE evidence ADD COLUMN payload_hash TEXT;'); } catch (_) {}
       try { db.exec('ALTER TABLE evidence ADD COLUMN ingested_by_service TEXT;'); } catch (_) {}
+
+      // Add columns to maker_checker_reviews for version-bound candidate approval and deduction consumption
+      try { db.exec('ALTER TABLE maker_checker_reviews ADD COLUMN candidate_hash TEXT;'); } catch (_) {}
+      try { db.exec('ALTER TABLE maker_checker_reviews ADD COLUMN candidate_id TEXT;'); } catch (_) {}
+      try { db.exec('ALTER TABLE maker_checker_reviews ADD COLUMN additions_json TEXT;'); } catch (_) {}
+      try { db.exec('ALTER TABLE maker_checker_reviews ADD COLUMN evidence_version TEXT;'); } catch (_) {}
+      try { db.exec('ALTER TABLE maker_checker_reviews ADD COLUMN spec_version TEXT;'); } catch (_) {}
+      try { db.exec('ALTER TABLE maker_checker_reviews ADD COLUMN is_consumed INTEGER DEFAULT 0;'); } catch (_) {}
+      try { db.exec('ALTER TABLE maker_checker_reviews ADD COLUMN consumed_at TEXT;'); } catch (_) {}
+      try { db.exec('ALTER TABLE maker_checker_reviews ADD COLUMN consumed_by TEXT;'); } catch (_) {}
     }
   }
 ];

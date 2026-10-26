@@ -392,21 +392,65 @@ function checkMakerCheckerSeparation({ entityType, entityId, checkerUserId }) {
   return { allowed: true };
 }
 
-function recordMakerCheckerReview({ entityType, entityId, entityVersion, makerId, checkerId, decision, reason }) {
+function recordMakerCheckerReview({
+  entityType,
+  entityId,
+  entityVersion,
+  makerId,
+  checkerId,
+  decision,
+  reason,
+  candidateHash = null,
+  candidateId = null,
+  additions = null,
+  evidenceVersion = null,
+  specVersion = null
+}) {
   const db = getDb();
   const reviewId = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  // Supersede prior reviews for this entity
-  db.prepare('UPDATE maker_checker_reviews SET is_superseded = 1 WHERE entity_type = ? AND entity_id = ?')
-    .run(entityType, entityId);
+  // Supersede prior unconsumed reviews for this entity
+  try {
+    db.prepare('UPDATE maker_checker_reviews SET is_superseded = 1 WHERE entity_type = ? AND entity_id = ? AND (is_consumed = 0 OR is_consumed IS NULL)')
+      .run(entityType, entityId);
+  } catch (_) {
+    db.prepare('UPDATE maker_checker_reviews SET is_superseded = 1 WHERE entity_type = ? AND entity_id = ?')
+      .run(entityType, entityId);
+  }
 
-  db.prepare(`
-    INSERT INTO maker_checker_reviews (
-      review_id, entity_type, entity_id, entity_version, maker_id,
-      checker_id, decision, reason, reviewed_at, is_superseded
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-  `).run(reviewId, entityType, entityId, entityVersion, makerId || 'SYSTEM_LEGACY', checkerId, decision, reason, now);
+  const additionsJson = additions ? JSON.stringify(additions) : null;
+  try {
+    db.prepare(`
+      INSERT INTO maker_checker_reviews (
+        review_id, entity_type, entity_id, entity_version, maker_id,
+        checker_id, decision, reason, reviewed_at, is_superseded,
+        candidate_hash, candidate_id, additions_json, evidence_version, spec_version, is_consumed
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 0)
+    `).run(
+      reviewId,
+      entityType,
+      entityId,
+      entityVersion,
+      makerId || 'SYSTEM_LEGACY',
+      checkerId,
+      decision,
+      reason,
+      now,
+      candidateHash,
+      candidateId,
+      additionsJson,
+      evidenceVersion,
+      specVersion
+    );
+  } catch (_) {
+    db.prepare(`
+      INSERT INTO maker_checker_reviews (
+        review_id, entity_type, entity_id, entity_version, maker_id,
+        checker_id, decision, reason, reviewed_at, is_superseded
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+    `).run(reviewId, entityType, entityId, entityVersion, makerId || 'SYSTEM_LEGACY', checkerId, decision, reason, now);
+  }
 
   logSecurityEvent('MAKER_CHECKER_REVIEW', checkerId, 'HUMAN', null, `${decision} review on ${entityType}:${entityId} v${entityVersion}`);
   return reviewId;

@@ -27,6 +27,7 @@ const cors = require('cors');
 process.env.NODE_ENV = 'test';
 process.env.SESSION_SECRET = 'test-session-secret-key-stage-c5-secure-random';
 process.env.ENABLE_DEMO_RESET = 'true';
+process.env.BOOTSTRAP_DEVELOPMENT_ACCOUNTS = 'true';
 
 // Isolated audit-owned PKI directory
 const isolatedPkiDir = path.join(os.tmpdir(), `metallisense-c5-pki-${Date.now()}`);
@@ -39,7 +40,7 @@ fs.mkdirSync(testDbDir, { recursive: true });
 const testDbPath = path.join(testDbDir, `c5-workflow-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.db`);
 process.env.METALLISENSE_DB_PATH = testDbPath;
 
-const { getDb, closeDb } = require('../db');
+const { getDb, closeDb, bootstrapDevAccounts } = require('../db');
 const store = require('../store');
 const { authenticate, csrfProtection } = require('../authMiddleware');
 const authRoutes = require('../authRoutes');
@@ -48,6 +49,7 @@ const salesRoutes = require('../salesRoutes');
 
 // Initialize database schema and seeds
 store.seed(true);
+bootstrapDevAccounts(getDb(), { forceBootstrap: true });
 
 // Build test HTTP server
 const app = express();
@@ -457,6 +459,33 @@ async function runStageC5WorkflowSuite() {
           lines: [{ lotId: 'ALY-0903', kg: 15 }] // FeSi-75
         };
 
+        // Evaluate & approve candidate before deduction
+        const evalRes = await request('POST', '/api/v2/premelt/corrections/evaluate', {
+          headers: metUser.headers,
+          body: {
+            heatId: liveHeatId,
+            additions: [{ lotId: 'ALY-0903', kg: 15 }],
+            targetGrade: 'SG-IRON'
+          }
+        });
+        const candidateHash = evalRes.data?.data?.candidateHash;
+        const candidateId = `CAND-C5-${Date.now()}`;
+        const dbPre = getDb();
+        const curHeat = dbPre.prepare('SELECT version FROM heats WHERE heat_id = ?').get(liveHeatId);
+
+        await request('POST', '/api/v2/premelt/corrections/approve', {
+          headers: metUser.headers,
+          body: {
+            heatId: liveHeatId,
+            candidateId,
+            candidateHash,
+            expectedHeatVersion: curHeat.version,
+            specVersion: '1.0',
+            additions: [{ lotId: 'ALY-0903', kg: 15 }],
+            makerId: 'operator1'
+          }
+        });
+
         // First deduction
         const d1 = await request('POST', '/api/v2/premelt/additives/deduct', {
           headers: { ...opUser.headers, 'Idempotency-Key': idempKey },
@@ -774,6 +803,30 @@ async function runStageC5WorkflowSuite() {
           }
         });
         if (startRes.status !== 200) throw new Error(`Start melting failed in TC-C5-011: status=${startRes.status}`);
+
+        // Evaluate and approve additive before deduction
+        const crashEval = await request('POST', '/api/v2/premelt/corrections/evaluate', {
+          headers: metUser.headers,
+          body: {
+            heatId: crashHeatId,
+            additions: [{ lotId: 'ALY-0905', kg: 10 }],
+            targetGrade: 'SG-IRON'
+          }
+        });
+        const dbCrash = getDb();
+        const crashHeatRow = dbCrash.prepare('SELECT version FROM heats WHERE heat_id = ?').get(crashHeatId);
+        await request('POST', '/api/v2/premelt/corrections/approve', {
+          headers: metUser.headers,
+          body: {
+            heatId: crashHeatId,
+            candidateId: `CAND-CRASH-${Date.now()}`,
+            candidateHash: crashEval.data?.data?.candidateHash,
+            expectedHeatVersion: crashHeatRow.version,
+            specVersion: '1.0',
+            additions: [{ lotId: 'ALY-0905', kg: 10 }],
+            makerId: 'operator1'
+          }
+        });
 
         // Deduct an additive
         await request('POST', '/api/v2/premelt/additives/deduct', {

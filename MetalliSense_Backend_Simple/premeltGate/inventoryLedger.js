@@ -66,7 +66,7 @@ function getAvailableKg(db, lotId) {
 /**
  * Deduct additives atomically with idempotency and strict boundary validation.
  */
-function deductAdditivesAtomic({ lines, heatId, idempotencyKey, by, note }) {
+function deductAdditivesAtomic({ lines, heatId, idempotencyKey, by, note, candidateId, candidateHash, requireApproval = false }) {
   if (!idempotencyKey || typeof idempotencyKey !== 'string' || !idempotencyKey.trim()) {
     throw err(400, "Header 'Idempotency-Key' or field 'idempotencyKey' is required for inventory mutations");
   }
@@ -161,6 +161,133 @@ function deductAdditivesAtomic({ lines, heatId, idempotencyKey, by, note }) {
     const nowIso = new Date().toISOString();
     const actorStr = String(by || lines[0].by || 'unverified_operator').trim();
 
+    let activeApproval = null;
+    if (requireApproval) {
+      activeApproval = txDb.prepare(`
+        SELECT * FROM maker_checker_reviews
+        WHERE entity_type = 'ALLOY_CORRECTION' AND entity_id = ? AND decision = 'APPROVED' AND is_superseded = 0
+        ORDER BY rowid DESC LIMIT 1
+      `).get(targetHeatId);
+
+      if (!activeApproval) {
+        throw err(409, `APPROVAL_REQUIRED: No approved alloy correction review exists for heat '${targetHeatId}'`, {
+          code: 'APPROVAL_REQUIRED'
+        });
+      }
+
+      if (activeApproval.is_consumed === 1) {
+        throw err(409, `APPROVAL_ALREADY_CONSUMED: Alloy correction approval '${activeApproval.review_id}' has already been consumed for heat '${targetHeatId}'`, {
+          code: 'APPROVAL_ALREADY_CONSUMED'
+        });
+      }
+
+      if (activeApproval.maker_id && activeApproval.checker_id && activeApproval.maker_id.toLowerCase() === activeApproval.checker_id.toLowerCase()) {
+        throw err(403, `MAKER_CHECKER_VIOLATION: Approver (${activeApproval.checker_id}) cannot be identical to candidate maker (${activeApproval.maker_id})`, {
+          code: 'MAKER_CHECKER_VIOLATION'
+        });
+      }
+
+      if (Number(activeApproval.entity_version) !== Number(heatRow.version)) {
+        throw err(409, `STALE_APPROVAL_HEAT_VERSION: Approval was for heat version v${activeApproval.entity_version} but current heat version is v${heatRow.version}`, {
+          code: 'STALE_APPROVAL_HEAT_VERSION',
+          approvalVersion: activeApproval.entity_version,
+          heatVersion: heatRow.version
+        });
+      }
+
+      const latestEv = txDb.prepare(`
+        SELECT sample_id FROM evidence
+        WHERE heat_id = ? AND evidence_type IN ('MELT_MEASURED', 'POST_CORRECTION_MEASURED')
+        ORDER BY rowid DESC LIMIT 1
+      `).get(targetHeatId);
+
+      if (activeApproval.evidence_version && latestEv && latestEv.sample_id !== activeApproval.evidence_version) {
+        throw err(409, `STALE_APPROVAL_EVIDENCE: Newer chemistry evidence exists (${latestEv.sample_id}) than candidate approval evidence (${activeApproval.evidence_version})`, {
+          code: 'STALE_APPROVAL_EVIDENCE',
+          currentEvidence: latestEv.sample_id,
+          expectedEvidence: activeApproval.evidence_version
+        });
+      }
+
+      if (activeApproval.spec_version && activeApproval.spec_version !== '1.0') {
+        throw err(409, `STALE_APPROVAL_SPEC: Specification version mismatch (${activeApproval.spec_version} vs 1.0)`, {
+          code: 'STALE_APPROVAL_SPEC'
+        });
+      }
+
+      if (candidateId && activeApproval.candidate_id && candidateId !== activeApproval.candidate_id) {
+        throw err(409, `APPROVAL_CANDIDATE_MISMATCH: Requested candidate '${candidateId}' does not match approved candidate '${activeApproval.candidate_id}'`, {
+          code: 'APPROVAL_CANDIDATE_MISMATCH'
+        });
+      }
+
+      if (candidateHash && activeApproval.candidate_hash && candidateHash !== activeApproval.candidate_hash) {
+        throw err(409, `APPROVAL_CANDIDATE_HASH_MISMATCH: Candidate hash mismatch`, {
+          code: 'APPROVAL_CANDIDATE_HASH_MISMATCH'
+        });
+      }
+
+      if (activeApproval.additions_json) {
+        let approvedList;
+        try {
+          approvedList = JSON.parse(activeApproval.additions_json);
+        } catch (_) {
+          approvedList = [];
+        }
+
+        if (Array.isArray(approvedList) && approvedList.length > 0) {
+          const approvedDemandMap = new Map();
+          for (const a of approvedList) {
+            const lid = a.lotId || a.lot_id;
+            const kg = Number(a.kg !== undefined ? a.kg : (a.amount_kg !== undefined ? a.amount_kg : a.quantity));
+            if (lid) {
+              approvedDemandMap.set(lid, (approvedDemandMap.get(lid) || 0) + kg);
+            }
+          }
+
+          const requestedDemandMap = new Map();
+          for (const l of lines) {
+            const lid = l.lotId;
+            const kg = Number(l.kg || 0);
+            requestedDemandMap.set(lid, (requestedDemandMap.get(lid) || 0) + kg);
+          }
+
+          let mismatch = false;
+          let mismatchReason = '';
+
+          for (const [lid, reqKg] of requestedDemandMap.entries()) {
+            if (!approvedDemandMap.has(lid)) {
+              mismatch = true;
+              mismatchReason = `Lot '${lid}' was not in approved candidate additions`;
+              break;
+            }
+            const appKg = approvedDemandMap.get(lid);
+            if (Math.abs(reqKg - appKg) > 0.001) {
+              mismatch = true;
+              mismatchReason = `Lot '${lid}' requested quantity ${reqKg} kg does not match approved ${appKg} kg`;
+              break;
+            }
+          }
+
+          if (!mismatch) {
+            for (const [lid, appKg] of approvedDemandMap.entries()) {
+              if (!requestedDemandMap.has(lid) && appKg > 0.001) {
+                mismatch = true;
+                mismatchReason = `Approved lot '${lid}' (${appKg} kg) was omitted from deduction request`;
+                break;
+              }
+            }
+          }
+
+          if (mismatch) {
+            throw err(409, `APPROVAL_PAYLOAD_MISMATCH: Requested additions changed from approved candidate: ${mismatchReason}`, {
+              code: 'APPROVAL_PAYLOAD_MISMATCH'
+            });
+          }
+        }
+      }
+    }
+
     // Check every lot existence and available balance
     for (const [lotId, demand] of aggregatedDemands.entries()) {
       const lotRow = txDb.prepare('SELECT * FROM lots WHERE lot_id = ?').get(lotId);
@@ -232,6 +359,19 @@ function deductAdditivesAtomic({ lines, heatId, idempotencyKey, by, note }) {
         deductedKg: deductKg,
         remainingKg
       });
+    }
+
+    // Consume approval and advance heat version if approval was enforced
+    if (activeApproval) {
+      txDb.prepare(`
+        UPDATE maker_checker_reviews
+        SET is_consumed = 1, consumed_at = ?, consumed_by = ?
+        WHERE review_id = ?
+      `).run(nowIso, actorStr, activeApproval.review_id);
+
+      txDb.prepare(`
+        UPDATE heats SET version = version + 1, updated_at = ? WHERE heat_id = ?
+      `).run(nowIso, targetHeatId);
     }
 
     // Record audit event

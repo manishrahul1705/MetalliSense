@@ -21,15 +21,15 @@ const TopBar = ({ title, actions }) => {
   const primaryRole = user?.roles?.[0] || "OPERATOR";
 
   return (
-    <div className="bg-white/80 backdrop-blur-sm border-b border-metal-200 px-6 py-4 shadow-sm">
+    <div className="bg-white/80 backdrop-blur-sm border-b border-metal-200 pl-16 pr-3 sm:px-6 py-2 sm:py-4 shadow-sm">
       <div className="flex justify-between items-center">
-        <div className="flex items-center gap-3">
-          <div className="w-1.5 h-10 bg-gradient-to-b from-emerald-500 to-emerald-600 rounded-full shadow-md" />
-          <h1 className="text-2xl font-bold text-metal-900">{title}</h1>
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className="w-1.5 h-8 sm:h-10 bg-gradient-to-b from-emerald-500 to-emerald-600 rounded-full shadow-md flex-shrink-0" />
+          <h1 className="text-lg sm:text-2xl font-bold text-metal-900 truncate max-w-[180px] sm:max-w-none">{title}</h1>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
           {actions}
-          <OPCStatusIndicator />
+          <div className="hidden md:flex"><OPCStatusIndicator /></div>
 
           {/* User Menu or Sign In */}
           {user ? (
