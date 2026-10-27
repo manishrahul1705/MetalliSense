@@ -14,6 +14,8 @@
  * 9. Backend OS-level process kill and restart with same SQLite file: verification of persistence
  */
 import { chromium } from '@playwright/test';
+import crypto from 'crypto';
+const spectroToken = crypto.randomBytes(32).toString('hex');
 import { spawn, spawnSync } from 'child_process';
 import http from 'http';
 import fs from 'fs';
@@ -111,6 +113,7 @@ async function run() {
     NODE_ENV: 'test',
     SEED_DEV_ACCOUNTS: 'true',
     ALLOW_DEV_BOOTSTRAP: 'true',
+    DEV_SPECTRO_TOKEN: spectroToken,
     ALLOWED_ORIGINS: `http://localhost:${FRONTEND_PORT},http://127.0.0.1:${FRONTEND_PORT},http://localhost:3000,http://127.0.0.1:3000`
   };
 
@@ -287,7 +290,7 @@ async function run() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer spectro-dev-token-secret-2026'
+        'Authorization': `Bearer ${spectroToken}`
       },
       body: JSON.stringify({
         evidenceType: 'MELT_MEASURED',

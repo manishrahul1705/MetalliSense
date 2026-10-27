@@ -422,14 +422,16 @@ function bootstrapDevAccounts(targetDb = null, credentials = {}) {
     inventory: credentials.inventoryPassword || process.env.DEV_INVENTORY_PASSWORD || (isTest ? 'InventoryPass123!' : null),
     finance: credentials.financePassword || process.env.DEV_FINANCE_PASSWORD || (isTest ? 'FinancePass123!' : null),
     admin: credentials.adminPassword || process.env.DEV_ADMIN_PASSWORD || (isTest ? 'AdminSecurePass123!' : null),
-    spectroToken: credentials.spectroToken || process.env.DEV_SPECTRO_TOKEN || (isTest ? 'spectro-dev-token-secret-2026' : null),
-    labToken: credentials.labToken || process.env.DEV_LAB_TOKEN || (isTest ? 'lab-dev-token-secret-2026' : null),
+    spectroToken: credentials.spectroToken || process.env.DEV_SPECTRO_TOKEN || null,
+    labToken: credentials.labToken || process.env.DEV_LAB_TOKEN || null,
   };
 
-  // If in dev and no password provided via env, generate cryptographically secure ephemeral passwords
+  // If in dev/test and no password/token provided via env, generate cryptographically secure ephemeral credentials
   Object.keys(creds).forEach((k) => {
     if (!creds[k]) {
-      creds[k] = crypto.randomBytes(16).toString('base64url') + '!1Aa';
+      creds[k] = k.endsWith('Token')
+        ? crypto.randomBytes(32).toString('hex')
+        : crypto.randomBytes(16).toString('base64url') + '!1Aa';
     }
   });
 

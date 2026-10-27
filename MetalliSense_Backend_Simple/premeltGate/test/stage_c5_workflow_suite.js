@@ -23,6 +23,10 @@ const os = require('os');
 const express = require('express');
 const cors = require('cors');
 
+const crypto = require('crypto');
+const spectroToken = crypto.randomBytes(32).toString('hex');
+process.env.DEV_SPECTRO_TOKEN = spectroToken;
+
 // Test environment setup
 process.env.NODE_ENV = 'test';
 process.env.SESSION_SECRET = 'test-session-secret-key-stage-c5-secure-random';
@@ -197,7 +201,7 @@ async function runStageC5WorkflowSuite() {
     const finUser = await loginUser('finance1', 'FinancePass123!');
     const adminUser = await loginUser('admin1', 'AdminSecurePass123!');
     const spectrometerAuth = {
-      headers: { 'Authorization': 'Bearer spectro-dev-token-secret-2026' }
+      headers: { 'Authorization': 'Bearer ' + spectroToken }
     };
     console.log(`[${new Date().toISOString()}] All actor roles authenticated.`);
 

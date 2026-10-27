@@ -18,9 +18,12 @@ const assert = require('assert');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { spawn, execSync } = require('child_process');
 const express = require('express');
 
+const spectroToken = crypto.randomBytes(32).toString('hex');
+process.env.DEV_SPECTRO_TOKEN = spectroToken;
 process.env.NODE_ENV = 'test';
 process.env.BOOTSTRAP_DEVELOPMENT_ACCOUNTS = 'true';
 process.env.SESSION_SECRET = 'concurrency-qualification-secret-2026';
@@ -217,7 +220,7 @@ async function runTests() {
       await makeRequest(`/api/v2/premelt/heats/${heatId}/evidence`, {
         method: 'POST',
         headers: {
-          'Authorization': 'Bearer spectro-dev-token-secret-2026',
+          'Authorization': `Bearer ${spectroToken}`,
           'Content-Type': 'application/json'
         },
         body: {

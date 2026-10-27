@@ -6,8 +6,20 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const assert = require('assert');
+const crypto = require('crypto');
 
-// Configure test environment
+const os = require('os');
+const spectroToken = crypto.randomBytes(32).toString('hex');
+const labToken = crypto.randomBytes(32).toString('hex');
+process.env.DEV_SPECTRO_TOKEN = spectroToken;
+process.env.DEV_LAB_TOKEN = labToken;
+
+// Configure test environment with isolated database
+const testDbDir = path.join(os.tmpdir(), `metallisense-stage1b-test-${Date.now()}`);
+fs.mkdirSync(testDbDir, { recursive: true });
+process.env.METALLISENSE_DB_PATH = path.join(testDbDir, 'stage1b.db');
+process.env.ALLOW_DEV_BOOTSTRAP = 'true';
+process.env.SEED_DEV_ACCOUNTS = 'true';
 process.env.NODE_ENV = 'test';
 process.env.ENABLE_DEMO_RESET = 'true';
 process.env.DEMO_RESET_CONFIRM = 'DEMO_RESET_CONFIRM';
@@ -362,7 +374,7 @@ async function run() {
     {
       const t0 = Date.now();
       const res = await request('GET', '/api/v2/auth/me', {
-        headers: { Authorization: 'Bearer spectro-dev-token-secret-2026' }
+        headers: { Authorization: `Bearer ${spectroToken}` }
       });
       const passed = res.status === 200 &&
                      res.data.data.service.serviceId === 'SVC-SPECTRO-01' &&
@@ -667,7 +679,7 @@ async function run() {
 
       // Submit measured chemistry via spectrometer service
       await request('POST', `/api/v2/premelt/heats/${plannedHeatId}/evidence`, {
-        headers: { Authorization: 'Bearer spectro-dev-token-secret-2026' },
+        headers: { Authorization: `Bearer ${spectroToken}` },
         body: {
           sampleId: `SPECTRO-${plannedHeatId}-TAP`,
           evidenceType: 'MELT_MEASURED',
@@ -896,7 +908,7 @@ async function run() {
     {
       const t0 = Date.now();
       const res = await request('POST', `/api/v2/premelt/heats/${testHeatId}/evidence`, {
-        headers: { Authorization: 'Bearer spectro-dev-token-secret-2026' },
+        headers: { Authorization: `Bearer ${spectroToken}` },
         body: {
           sampleId: `SMP-${testHeatId}-01`,
           evidenceType: 'MELT_MEASURED',
@@ -918,7 +930,7 @@ async function run() {
     {
       const t0 = Date.now();
       const res = await request('POST', `/api/v2/premelt/heats/${testHeatId}/evidence`, {
-        headers: { Authorization: 'Bearer spectro-dev-token-secret-2026' },
+        headers: { Authorization: `Bearer ${spectroToken}` },
         body: {
           sampleId: `SMP-${testHeatId}-01`,
           evidenceType: 'MELT_MEASURED',
@@ -937,7 +949,7 @@ async function run() {
     {
       const t0 = Date.now();
       const res = await request('POST', `/api/v2/premelt/heats/${testHeatId}/evidence`, {
-        headers: { Authorization: 'Bearer spectro-dev-token-secret-2026' },
+        headers: { Authorization: `Bearer ${spectroToken}` },
         body: {
           sampleId: `SMP-${testHeatId}-01`,
           evidenceType: 'MELT_MEASURED',
@@ -977,7 +989,7 @@ async function run() {
     {
       const t0 = Date.now();
       const res = await request('POST', `/api/v2/premelt/heats/${testHeatId}/evidence`, {
-        headers: { Authorization: 'Bearer spectro-dev-token-secret-2026' },
+        headers: { Authorization: `Bearer ${spectroToken}` },
         body: {
           sampleId: `SMP-${testHeatId}-EST`,
           evidenceType: 'MODEL_ESTIMATE',

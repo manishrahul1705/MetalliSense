@@ -15,9 +15,12 @@
 
 const assert = require('assert');
 const http = require('http');
+const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
 
+const spectroToken = crypto.randomBytes(32).toString('hex');
+process.env.DEV_SPECTRO_TOKEN = spectroToken;
 process.env.NODE_ENV = 'test';
 process.env.BOOTSTRAP_DEVELOPMENT_ACCOUNTS = 'true';
 process.env.SESSION_SECRET = 'deduction-approval-test-secret-32-chars-long!!';
@@ -150,7 +153,7 @@ async function runTests() {
     // Add MELT_MEASURED evidence via spectrometer service
     const ev1Res = await makeRequest(`/api/v2/premelt/heats/${heatId}/evidence`, {
       method: 'POST',
-      headers: { Authorization: 'Bearer spectro-dev-token-secret-2026' },
+      headers: { Authorization: `Bearer ${spectroToken}` },
       body: {
         sampleId: 'SMP-TEST-001',
         evidenceType: 'MELT_MEASURED',
@@ -345,7 +348,7 @@ async function runTests() {
       // Ingest newer evidence via spectrometer service
       const ev2Res = await makeRequest(`/api/v2/premelt/heats/${heatId}/evidence`, {
         method: 'POST',
-        headers: { Authorization: 'Bearer spectro-dev-token-secret-2026' },
+        headers: { Authorization: `Bearer ${spectroToken}` },
         body: {
           sampleId: 'SMP-TEST-NEW-002',
           evidenceType: 'MELT_MEASURED',
