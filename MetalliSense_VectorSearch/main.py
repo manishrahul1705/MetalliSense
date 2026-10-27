@@ -161,14 +161,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Scoped internal service authentication middleware
-INTERNAL_SERVICE_KEY = os.getenv("METALLISENSE_INTERNAL_SERVICE_KEY", "metallisense-internal-service-secret-key-2026")
+# Scoped internal service authentication middleware (Fail-closed; no hardcoded defaults)
+def get_service_key() -> str:
+    key = os.getenv("METALLISENSE_VECTOR_SERVICE_KEY") or os.getenv("METALLISENSE_INTERNAL_SERVICE_KEY")
+    return (key or "").strip()
 
 @app.middleware("http")
 async def verify_internal_service_auth(request: Request, call_next):
     public_paths = {"/", "/health", "/docs", "/redoc", "/openapi.json"}
     if request.url.path in public_paths or request.method == "OPTIONS":
         return await call_next(request)
+    
+    expected_key = get_service_key()
+    if not expected_key:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "code": "SERVICE_AUTH_UNCONFIGURED",
+                "message": "Service authentication is not configured; failing closed."
+            }
+        )
     
     token = request.headers.get("X-Internal-Service-Key")
     auth_header = request.headers.get("Authorization", "")
@@ -184,13 +197,13 @@ async def verify_internal_service_auth(request: Request, call_next):
                 "message": "Direct access rejected: internal service authentication required."
             }
         )
-    if token != INTERNAL_SERVICE_KEY:
+    if token != expected_key:
         return JSONResponse(
             status_code=403,
             content={
                 "status": "fail",
                 "code": "FORBIDDEN_SERVICE",
-                "message": "Invalid internal service token."
+                "message": "Invalid or unauthorized internal service token."
             }
         )
     return await call_next(request)

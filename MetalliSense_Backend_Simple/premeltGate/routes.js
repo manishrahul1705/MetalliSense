@@ -29,19 +29,26 @@ const wrap = (fn) => async (req, res) => {
     const data = await fn(req, res);
     if (!res.headersSent) res.json({ status: 'success', data });
   } catch (e) {
-    const status = (typeof e.status === 'number' && e.status >= 400 && e.status < 600)
-      ? e.status
-      : (e.code === 'ERR_INVALID_ARG_TYPE' || e.name === 'TypeError' || e.name === 'CsvError') ? 400 : 500;
-    const isClientError = status < 500;
-    const isInternalArgType = e.code === 'ERR_INVALID_ARG_TYPE' || e.name === 'TypeError' || e.name === 'CsvError';
-    const message = isClientError
-      ? (!isInternalArgType && e.message && !e.message.includes('SQLite') ? e.message : 'Invalid request parameters.')
-      : 'An unexpected internal error occurred.';
-    const { message: _m, status: _s, stack: _st, ...extra } = e;
-    if (isInternalArgType) {
-      delete extra.code;
+    // Only return 4xx for explicitly validated client errors
+    const isExplicitClientError = (typeof e.status === 'number' && e.status >= 400 && e.status < 500)
+      || e.name === 'ValidationError'
+      || e.name === 'CsvError';
+
+    if (isExplicitClientError) {
+      const status = typeof e.status === 'number' ? e.status : 400;
+      const { message, status: _s, stack: _st, ...extra } = e;
+      return res.status(status).json({
+        status: 'fail',
+        message: (message && !message.includes('SQLite')) ? message : 'Invalid request parameters.',
+        ...extra
+      });
     }
-    res.status(status).json({ status: isClientError ? 'fail' : 'error', message, ...extra });
+
+    // Unexpected internal failures MUST be sanitized 500 responses with redacted server diagnostics
+    res.status(500).json({
+      status: 'error',
+      message: 'An unexpected internal error occurred.'
+    });
   }
 };
 const bad = (status, message, extra = {}) => Object.assign(new Error(message), { status, ...extra });
@@ -191,7 +198,7 @@ router.post('/additives/deduct', requireAuth, requireRole('OPERATOR', 'METALLURG
 }));
 
 // ================================================================ Correction Feasibility & Approval
-router.post('/corrections/evaluate', requireAuth, wrap((req) => {
+router.post('/corrections/evaluate', requireAuth, requireHuman, wrap((req) => {
   const { heatId, additions, targetGrade } = req.body || {};
   if (!heatId) throw bad(400, 'heatId is required');
   const heat = store.heats.get(heatId);

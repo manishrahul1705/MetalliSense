@@ -398,8 +398,17 @@ app.use('/api/v1/spectrometer', opcRouter);
 
 // ======================= AI SERVICE PROXY (:8000) =======================
 const axios = require('axios');
-const INTERNAL_SERVICE_KEY = process.env.METALLISENSE_INTERNAL_SERVICE_KEY || 'metallisense-internal-service-secret-key-2026';
-axios.defaults.headers.common['X-Internal-Service-Key'] = INTERNAL_SERVICE_KEY;
+
+function getServiceKey(targetUrl) {
+  const urlStr = String(targetUrl || '');
+  if (urlStr.includes(':8000')) {
+    return (process.env.METALLISENSE_AI_SERVICE_KEY || process.env.METALLISENSE_INTERNAL_SERVICE_KEY || '').trim();
+  }
+  if (urlStr.includes(':8002')) {
+    return (process.env.METALLISENSE_VECTOR_SERVICE_KEY || process.env.METALLISENSE_INTERNAL_SERVICE_KEY || '').trim();
+  }
+  return (process.env.METALLISENSE_AGENT_SERVICE_KEY || process.env.METALLISENSE_INTERNAL_SERVICE_KEY || '').trim();
+}
 
 const AI_URL = {
   toString() { return process.env.AI_SERVICE_URL || 'http://127.0.0.1:8000'; }
@@ -409,14 +418,23 @@ const AGENT_URL = {
 };
 
 async function proxy(res, method, url, data) {
+  const serviceKey = getServiceKey(url);
+  if (!serviceKey) {
+    return res.status(500).json({
+      status: 'error',
+      code: 'SERVICE_AUTH_UNCONFIGURED',
+      message: `Gateway internal service key for upstream call to ${url} is not configured; proxy request blocked.`
+    });
+  }
+
   try {
     const response = await axios({
       method,
       url,
       data,
       headers: {
-        'X-Internal-Service-Key': INTERNAL_SERVICE_KEY,
-        'Authorization': `Bearer ${INTERNAL_SERVICE_KEY}`
+        'X-Internal-Service-Key': serviceKey,
+        'Authorization': `Bearer ${serviceKey}`
       },
       timeout: 30000
     });

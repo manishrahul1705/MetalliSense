@@ -21,6 +21,9 @@ process.env.NODE_ENV = 'test';
 process.env.ENABLE_DEMO_RESET = 'true';
 process.env.DEMO_RESET_CONFIRM = 'DEMO_RESET_CONFIRM';
 process.env.SESSION_SECRET = 'test-audit-session-secret-stage-f';
+const crypto = require('crypto');
+const testInternalKey = crypto.randomBytes(32).toString('hex');
+process.env.METALLISENSE_INTERNAL_SERVICE_KEY = testInternalKey;
 
 const { initTestDb, getDb, createMeltingHeat } = require('./testHelper');
 const { bootstrapDevAccounts } = require('../db');
@@ -389,7 +392,7 @@ async function runTests() {
     headers: { Cookie: cookieHdr(personas['ADMIN'].cookies), 'X-CSRF-Token': personas['ADMIN'].csrf },
     body: {}
   });
-  check('Gateway proxies attach scoped X-Internal-Service-Key to upstream requests', lastUpstreamHeader === 'metallisense-internal-service-secret-key-2026');
+  check('Gateway proxies attach scoped X-Internal-Service-Key to upstream requests', lastUpstreamHeader === testInternalKey);
 
   server.close();
   upstreamStubServer.close();

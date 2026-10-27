@@ -12,8 +12,9 @@
  */
 const crypto = require('crypto');
 const axios = require('axios');
-const INTERNAL_SERVICE_KEY = process.env.METALLISENSE_INTERNAL_SERVICE_KEY || 'metallisense-internal-service-secret-key-2026';
-axios.defaults.headers.common['X-Internal-Service-Key'] = INTERNAL_SERVICE_KEY;
+function getAgentServiceKey() {
+  return (process.env.METALLISENSE_AGENT_SERVICE_KEY || process.env.METALLISENSE_INTERNAL_SERVICE_KEY || '').trim();
+}
 const store = require('./store');
 const gradeStore = require('../gradeSpecStore');
 const additives = require('./additives');
@@ -198,7 +199,15 @@ async function aiCheck(grade, pred) {
 
   let ai;
   try {
-    const r = await axios.post(`${AGENT_URL}/premelt/assess`, { grade, composition, uncertainty }, { timeout: settings.aiTimeoutMs });
+    const serviceKey = getAgentServiceKey();
+    const headers = serviceKey ? {
+      'X-Internal-Service-Key': serviceKey,
+      'Authorization': `Bearer ${serviceKey}`
+    } : {};
+    const r = await axios.post(`${AGENT_URL}/premelt/assess`, { grade, composition, uncertainty }, {
+      headers,
+      timeout: settings.aiTimeoutMs
+    });
     ai = r.data;
   } catch (e) {
     const reason = e.response?.data?.detail || e.response?.data?.error || e.message;
