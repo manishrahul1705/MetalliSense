@@ -542,6 +542,16 @@ aiRouter.post('/agent/analyze', requireAuth, requireRole('OPERATOR', 'METALLURGI
   }
 });
 aiRouter.post('/explain', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'QUALITY_MANAGER', 'ADMIN'), async (req, res) => {
+  const targetUrl = `${AGENT_URL}/copilot/explain`;
+  const serviceKey = getServiceKey(targetUrl);
+  if (!serviceKey) {
+    return res.status(500).json({
+      status: 'error',
+      code: 'SERVICE_AUTH_UNCONFIGURED',
+      message: `Gateway internal service key for upstream call to ${targetUrl} is not configured; proxy request blocked.`
+    });
+  }
+
   // Frontend (AIAgent.jsx) sends { metalGrade, composition, anomalyResult,
   // alloyResult } — the Agent's /copilot/explain only requires
   // { composition, grade }. Translate field names + wrap the response in
@@ -549,11 +559,17 @@ aiRouter.post('/explain', requireAuth, requireRole('OPERATOR', 'METALLURGIST', '
   const { metalGrade, grade, composition } = req.body;
   const body = { composition, grade: grade || metalGrade };
   try {
-    const response = await axios.post(`${AGENT_URL}/copilot/explain`, body, { timeout: 30000 });
+    const response = await axios.post(targetUrl, body, {
+      headers: {
+        'X-Internal-Service-Key': serviceKey,
+        'Authorization': `Bearer ${serviceKey}`
+      },
+      timeout: 30000
+    });
     res.status(200).json({ status: 'success', data: { geminiExplanation: response.data } });
   } catch (err) {
     if (err.response) return res.status(err.response.status).json(err.response.data);
-    res.status(503).json({ status: 'error', message: `Could not reach ${AGENT_URL}/copilot/explain (${err.message})` });
+    res.status(503).json({ status: 'error', message: `Could not reach ${targetUrl} (${err.message})` });
   }
 });
 aiRouter.post('/analyze-with-explanation', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'QUALITY_MANAGER', 'ADMIN'), (req, res) => proxy(res, 'post', `${AGENT_URL}/analyze-with-explanation`, req.body));
@@ -827,12 +843,28 @@ function computeCarbonEstimate({ grade, batchWeightKg, recommendedAdditions = {}
 let nextCostId = 1;
 
 rlRouter.post('/optimize', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'ADMIN'), async (req, res) => {
+  const targetUrl = `${AGENT_URL}/rl/optimize`;
+  const serviceKey = getServiceKey(targetUrl);
+  if (!serviceKey) {
+    return res.status(500).json({
+      status: 'error',
+      code: 'SERVICE_AUTH_UNCONFIGURED',
+      message: `Gateway internal service key for upstream call to ${targetUrl} is not configured; proxy request blocked.`
+    });
+  }
+
   // Frontend sends topK (camelCase); the Agent service's Pydantic schema
   // requires top_k (snake_case). Convert before forwarding.
   const { grade, composition, topK, top_k, batchWeightKg } = req.body;
   const body = { grade, composition, top_k: top_k ?? topK ?? 3 };
   try {
-    const response = await axios.post(`${AGENT_URL}/rl/optimize`, body, { timeout: 30000 });
+    const response = await axios.post(targetUrl, body, {
+      headers: {
+        'X-Internal-Service-Key': serviceKey,
+        'Authorization': `Bearer ${serviceKey}`
+      },
+      timeout: 30000
+    });
     const agentData = response.data;
 
     // Annotate each candidate with an estimated cost, without touching
@@ -934,6 +966,16 @@ rlRouter.post('/optimize', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 
 });
 
 rlRouter.post('/feedback', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'ADMIN'), async (req, res) => {
+  const targetUrl = `${AGENT_URL}/rl/feedback`;
+  const serviceKey = getServiceKey(targetUrl);
+  if (!serviceKey) {
+    return res.status(500).json({
+      status: 'error',
+      code: 'SERVICE_AUTH_UNCONFIGURED',
+      message: `Gateway internal service key for upstream call to ${targetUrl} is not configured; proxy request blocked.`
+    });
+  }
+
   const { grade, composition, additions, aggressiveness, outcome, actualResult, actual_result, operatorNote, operator_note } = req.body;
   const body = {
     grade,
@@ -945,7 +987,13 @@ rlRouter.post('/feedback', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 
     operator_note: operator_note ?? operatorNote ?? null,
   };
   try {
-    const response = await axios.post(`${AGENT_URL}/rl/feedback`, body, { timeout: 3000 });
+    const response = await axios.post(targetUrl, body, {
+      headers: {
+        'X-Internal-Service-Key': serviceKey,
+        'Authorization': `Bearer ${serviceKey}`
+      },
+      timeout: 3000
+    });
     rlFeedbackLog.unshift({ ...body, computedReward: response.data?.computed_reward ?? null, createdAt: new Date() });
     res.status(response.status).json(response.data);
   } catch (err) {
