@@ -3,6 +3,7 @@ import api from '../../services/api';
 import Card from '../common/Card';
 import Button from '../common/Button';
 import toast from 'react-hot-toast';
+import MassBalance from './MassBalance';
 
 // Uses the normal heat, evidence, correction, inventory and release interfaces.
 export default function SimulationBatch({ heatId }) {
@@ -67,6 +68,7 @@ export default function SimulationBatch({ heatId }) {
     <Button disabled={!heatId || busy} onClick={() => run(load)}>Load simulation batch</Button>
     {heat && <div className="space-y-3 mt-4">
       <p>Batch {heat.heatId}: {heat.status} | {heat.executionContext} | version {heat.version}</p>
+      {heat.tap && <MassBalance balance={heat.tap.massBalance} addition={heat.tap.additionBalance} />}
       <p>Latest chemistry receipt: {evidence.filter(e => e.evidenceType === 'SIMULATED_MEASURED').at(-1)?.evidenceId || 'Missing'}</p>
       <label className="block">Correction stock<select aria-label="Correction stock" className="border p-2 ml-2" value={lotId} onChange={e => setLotId(e.target.value)}><option value="">Choose additive</option>{lots.map(l => <option key={l.lotId} value={l.lotId}>{l.lotId} {l.alloyName} ({l.availableKg} kg)</option>)}</select></label>
       <label className="block">Correction kg<input aria-label="Correction kg" type="number" step="0.001" className="border p-2 ml-2" value={kg} onChange={e => setKg(e.target.value)} /></label>

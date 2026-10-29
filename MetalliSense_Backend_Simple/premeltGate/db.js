@@ -407,6 +407,14 @@ const MIGRATIONS = [
         );
       `);
     }
+  },
+  {
+    version: 4,
+    name: '004_evidence_heat_and_sample_binding',
+    up(db) {
+      db.exec(`ALTER TABLE evidence ADD COLUMN heat_version INTEGER;
+        ALTER TABLE evidence ADD COLUMN parent_evidence_id TEXT REFERENCES evidence(evidence_id);`);
+    }
   }
 ];
 

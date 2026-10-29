@@ -77,7 +77,7 @@ async function waitForServer(port) {
     try {
       const res = await fetch(url);
       if (res.status < 500) return true;
-    } catch (_) {}
+    } catch (_) { /* Readiness retries until the explicit overall deadline. */ }
     await new Promise(r => setTimeout(r, 500));
   }
   throw new Error(`Server on port ${port} failed to start`);

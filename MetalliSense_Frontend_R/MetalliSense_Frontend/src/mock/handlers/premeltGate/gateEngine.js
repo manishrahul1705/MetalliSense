@@ -23,7 +23,7 @@ const {
   GRADE_SPECS, RESIDUAL_LIMITS, ADDABLE_ELEMENTS, MAX_ONLY_ELEMENTS, TRAMP_ELEMENTS, settings,
 } = require('./config');
 
-const AGENT_URL = undefined || 'http://127.0.0.1:8001';
+const AGENT_URL = 'http://127.0.0.1:8001';
 const SPEC_ELEMENTS = ['C', 'Si', 'Mn', 'P', 'S'];
 const SCRAP = ['STEEL_SCRAP', 'CI_SCRAP'];
 const RANK = { PASS: 0, SKIP: 0, WARN: 1, FAIL: 2 };

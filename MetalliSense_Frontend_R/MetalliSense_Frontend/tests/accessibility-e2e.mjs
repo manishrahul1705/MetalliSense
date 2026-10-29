@@ -267,7 +267,7 @@ async function run() {
       } else {
         preview.kill('SIGKILL');
       }
-    } catch (_) {}
+    } catch (_) { /* Cleanup is best effort; preserve the main test diagnostic. */ }
   }
 
   const outputPath = path.join(EVIDENCE_DIR, 'ACCESSIBILITY_REPORT.json');

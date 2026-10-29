@@ -8,7 +8,7 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 
-const AI_URL = undefined || undefined || 'http://localhost:8000';
+const AI_URL = 'http://localhost:8000';
 
 router.post('/predict', async (req, res) => {
   try {

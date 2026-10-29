@@ -255,7 +255,7 @@ export default function MechanicalProperties() {
     try {
       const hRes = await getHeat(flow.heatId);
       if (hRes.data?.data?.version !== undefined) activeVer = hRes.data.data.version;
-    } catch (_) {}
+    } catch (_) { /* Completion still sends the last known optimistic version. */ }
     try {
       const res = await completeHeat(flow.heatId, {
         approvedBy: engineer.trim(),

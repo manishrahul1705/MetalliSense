@@ -76,8 +76,11 @@ test('complete isolated simulated batch through human UI, actual OPC UA, persist
     await page.goto('/login');
     await page.getByRole('textbox', { name: /username/i }).fill(username);
     await page.locator('input[type=password]').fill(process.env[passwordEnv]);
+    const loggedIn = page.waitForResponse(r => r.url().endsWith('/auth/login') && r.request().method() === 'POST', { timeout: 15000 });
     await page.getByRole('button', { name: /sign in|log in|login/i }).click();
-    await expect(page).not.toHaveURL(/login/);
+    const loginResponse = await loggedIn;
+    expect(loginResponse.status(), 'Human UI login must succeed').toBe(200);
+    await expect(page).not.toHaveURL(/login/, { timeout: 15000 });
     return page;
   }
   async function receive(page, materialType, description, quantity, declared, alloyName) {
@@ -104,7 +107,14 @@ test('complete isolated simulated batch through human UI, actual OPC UA, persist
   async function api(page, route, data, extraHeaders = {}) {
     const cookies = await page.context().cookies(backendUrl);
     const csrf = cookies.find(c => c.name === 'metallisense_csrf')?.value;
-    return page.request.post(`${backendUrl}/api/v2/${route}`, { headers: { 'X-CSRF-Token': csrf || '', ...extraHeaders }, data, timeout: 10000 });
+    try {
+      return await page.request.post(`${backendUrl}/api/v2/${route}`, { headers: { 'X-CSRF-Token': csrf || '', ...extraHeaders }, data, timeout: 10000 });
+    } catch (error) {
+      // Record a transport failure without copying Playwright's cookie-bearing
+      // request dump into the shared report. It remains a required test failure.
+      diagnostics.push({ method: 'POST', url: `${backendUrl}/api/v2/${route}`, transportError: /ECONNRESET/.test(error.message) ? 'ECONNRESET' : 'REQUEST_FAILED' });
+      throw new Error(`HTTP request failed for ${route}; see sanitized diagnostics`);
+    }
   }
   async function get(page, route) {
     const r = await page.request.get(`${backendUrl}/api/v2/${route}`, { timeout: 10000 }); expect(r.status()).toBe(200); return (await r.json()).data;
@@ -328,17 +338,22 @@ test('complete isolated simulated batch through human UI, actual OPC UA, persist
       expect(before.stock.lot.availableKg).toBe(99);
       expect((await get(admin, `premelt/lots/${pig.lotId}`)).lot.availableKg).toBe(100);
       expect((await get(admin, `premelt/lots/${dri.lotId}`)).lot.availableKg).toBe(100);
-      expect(before.heat.tap.castingsKg).toBe(Math.round(expectedBathMassKg * 0.70));
-      expect(before.heat.tap.returnsKg).toBe(Math.round(expectedBathMassKg * 0.25));
+      expect(before.heat.tap.castingsKg).toBe(Math.floor(expectedBathMassKg * 0.70 * 1000) / 1000);
+      expect(before.heat.tap.returnsKg).toBe(Math.floor(expectedBathMassKg * 0.25 * 1000) / 1000);
+      const allocation = before.heat.tap.massBalance;
+      expect(allocation.differenceKg).toBe(0);
+      expect(Math.round((allocation.castingsKg + allocation.returnsKg + allocation.processLossKg + allocation.allocationRoundingResidualKg + allocation.unallocatedKg) * 1e6)).toBe(Math.round(expectedBathMassKg * 1e6));
+      expect(before.certificate.massBalance).toEqual(allocation);
+      expect(correctedReading.simulationBasis.unrecoveredAdditiveKg).toBe(0.12538);
       const invoice = before.invoices.find(i => i.heatId === heatId);
-      expect(invoice.taxableRs).toBe(before.heat.tap.castingsKg * before.heat.tap.sellingRsPerKg);
+      expect(invoice.taxableRs).toBe(Math.round(before.heat.tap.castingsKg * before.heat.tap.sellingRsPerKg * 100) / 100);
       expect(invoice.gstRs).toBeCloseTo(invoice.taxableRs * 0.18, 2);
       expect(invoice.totalRs).toBeCloseTo(invoice.taxableRs + invoice.gstRs, 2);
       fs.writeFileSync(path.join(evidenceDir, 'inventory-material-reconciliation.json'), JSON.stringify({
         initialBath, recoveredKg, dissolvedKg, expectedBathMassKg, expectedChemistry,
         correctedReading, stock: before.stock, tap: before.heat.tap, invoice,
         movements: persistedBefore.movements.filter(m => m.heat_id === heatId),
-        rounding: 'Chemistry 0.001 percentage point; ledger 0.001 kg; castings/returns/losses whole kg'
+        rounding: 'Chemistry 0.001 percentage point; ledger and castings/returns floor to 0.001 kg; mass accounting 0.000001 kg with explicit carry'
       }, null, 2));
       await stop(backend); await startBackend(request);
       const after = await snapshot(); expect(after).toEqual(before);
@@ -351,6 +366,29 @@ test('complete isolated simulated batch through human UI, actual OPC UA, persist
       expect((await api(fin, 'sales/invoices', { heatId, customerId: 'C-001' })).status()).toBe(409);
       expect(await snapshot()).toEqual(before);
       return { before, after, persistedBefore, persistedAfter: persisted() };
+    });
+    await record('n. Snapshot stability after configuration changes; responsive and keyboard controls', async () => {
+      const cert = await get(admin, `sales/certificates/${heatId}`);
+      const invoice = (await get(admin, 'sales/invoices')).find(i => i.heatId === heatId);
+      const fullInvoice = await get(admin, `sales/invoices/${invoice.invoiceId}`);
+      const configuration = await get(admin, 'sales/config');
+      const changed = await admin.request.patch(`${backendUrl}/api/v2/sales/config`, { headers: { 'X-CSRF-Token': (await admin.context().cookies(backendUrl)).find(c => c.name === 'metallisense_csrf').value }, data: { seller: { name: 'Changed isolated configuration' }, castingYieldPct: 68, returnsPct: 27, documentedLossPct: 5 } });
+      expect(changed.status()).toBe(200);
+      expect(await get(admin, `sales/certificates/${heatId}`)).toEqual(cert);
+      expect(await get(admin, `sales/invoices/${invoice.invoiceId}`)).toEqual(fullInvoice);
+      const restored = await admin.request.patch(`${backendUrl}/api/v2/sales/config`, { headers: { 'X-CSRF-Token': (await admin.context().cookies(backendUrl)).find(c => c.name === 'metallisense_csrf').value }, data: configuration });
+      expect(restored.status()).toBe(200);
+      for (const width of [360, 768, 1280]) {
+        await qm.setViewportSize({ width, height: 900 });
+        await qm.goto('/spectrometer');
+        await qm.getByLabel('Heat ID', { exact: true }).fill(heatId);
+        const load = qm.getByRole('button', { name: 'Load simulation batch', exact: true });
+        await load.focus(); await qm.keyboard.press('Enter');
+        await expect(qm.getByRole('region', { name: 'Mass reconciliation' })).toBeVisible();
+        expect(await qm.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+        await qm.screenshot({ path: path.join(evidenceDir, `responsive-keyboard-${width}.png`), fullPage: true });
+      }
+      return { certificateStable: true, invoiceStable: true, widths: [360,768,1280], keyboard: 'Enter activates native load button', zoom: 'OWNER-REPORTED MANUAL PASS only; not re-executed' };
     });
     expect(errors).toEqual([]);
   } finally {

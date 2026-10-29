@@ -335,8 +335,8 @@ app.use('/api/v1/spectrometer', opcRouter);
 
 // ======================= AI SERVICE PROXY (:8000) =======================
 const axios = require('axios');
-const AI_URL = undefined || 'http://localhost:8000';
-const AGENT_URL = undefined || 'http://127.0.0.1:8001';
+const AI_URL = 'http://localhost:8000';
+const AGENT_URL = 'http://127.0.0.1:8001';
 
 async function proxy(res, method, url, data) {
   try {

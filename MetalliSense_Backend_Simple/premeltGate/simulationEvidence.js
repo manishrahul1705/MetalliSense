@@ -27,11 +27,23 @@ function simulationReleaseEvidence(heat) {
     ORDER BY rowid DESC LIMIT 1`).get(heat.heatId);
   if (!approval) throw fail('An independently approved and consumed correction is required before simulation release');
   const chemistry = requireFresh(latestChemistry(heat.heatId, db));
+  if (chemistry.heat_version !== heat.version) throw fail('Chemistry is not bound to the current heat version');
   if (Date.parse(chemistry.created_at) <= Date.parse(approval.consumed_at)) throw fail('A subsequent simulated sample is required after correction deduction');
   const lab = db.prepare(`SELECT * FROM evidence WHERE heat_id = ? AND is_valid = 1
     AND evidence_type = 'SIMULATED_LAB' AND execution_context = 'SIMULATION' ORDER BY rowid DESC LIMIT 1`).get(heat.heatId);
-  if (!lab || Date.parse(lab.created_at) < Date.parse(chemistry.created_at)) throw fail('Final simulated laboratory QA is required after the corrected sample');
+  if (!lab || lab.heat_version !== heat.version || lab.parent_evidence_id !== chemistry.evidence_id || Date.parse(lab.created_at) < Date.parse(chemistry.created_at)) throw fail('Final simulated laboratory QA is required for the exact corrected sample and heat version');
   return { chemistry, lab, approval };
+}
+
+function operationalReleaseEvidence(heat) {
+  const db = getDb();
+  if (heat.executionContext !== 'OPERATIONAL' || context(db) !== 'OPERATIONAL') throw fail('Operational context mismatch');
+  const chemistry = requireFresh(latestChemistry(heat.heatId, db));
+  if (chemistry.heat_version !== heat.version || !chemistry.ingested_by_service || chemistry.provenance !== 'SERVICE_AUTHENTICATED') throw fail('Trusted chemistry bound to the current heat version is required');
+  const lab = db.prepare(`SELECT * FROM evidence WHERE heat_id = ? AND is_valid = 1
+    AND execution_context = 'OPERATIONAL' AND evidence_type = 'LAB_MEASURED' ORDER BY rowid DESC LIMIT 1`).get(heat.heatId);
+  if (!lab || lab.heat_version !== heat.version || lab.parent_evidence_id !== chemistry.evidence_id) throw fail('Persisted physical laboratory evidence bound to the exact chemistry sample is required');
+  return { chemistry, lab };
 }
 
 // Deterministic well-mixed bath model. Initial chemistry comes from the saved
@@ -49,9 +61,11 @@ function sampleForHeat(heatId) {
     AND entity_id = ? AND is_consumed = 1 ORDER BY rowid ASC`).all(heatId);
   const { ALLOY_COMPOSITIONS, ALLOY_RECOVERIES } = require('./correctionFeasibility');
   let bathMass = mass;
+  let deductedAdditiveKg = 0;
   const elementMass = Object.fromEntries(Object.entries(initial).map(([el, pct]) => [el, mass * pct / 100]));
   for (const review of reviews) {
     for (const addition of JSON.parse(review.additions_json)) {
+      deductedAdditiveKg += addition.kg;
       const alloy = ALLOY_COMPOSITIONS[addition.alloyName];
       const recovery = ALLOY_RECOVERIES[addition.alloyName];
       if (!alloy || !recovery) throw fail('Unsupported simulation alloy');
@@ -65,8 +79,12 @@ function sampleForHeat(heatId) {
   }
   const composition = Object.fromEntries(Object.entries(elementMass).map(([el, kg]) => [el, Math.round(kg / bathMass * 100000) / 1000]));
   require('./compositionValidation').validateComposition(composition);
-  return { composition, basis: 'SAVED_CHARGE_PLUS_CONSUMED_ADDITIONS_V1', initialMassKg: mass, bathMassKg: bathMass,
+  const canonicalKg = v => Math.round(v * 1e6) / 1e6;
+  const dissolvedAdditiveKg = canonicalKg(bathMass - mass);
+  return { composition, basis: 'SAVED_CHARGE_PLUS_CONSUMED_ADDITIONS_V1', heatVersion: heat.version,
+    initialMassKg: mass, bathMassKg: canonicalKg(bathMass), deductedAdditiveKg: canonicalKg(deductedAdditiveKg),
+    dissolvedAdditiveKg, unrecoveredAdditiveKg: canonicalKg(deductedAdditiveKg - dissolvedAdditiveKg),
     consumedApprovalIds: reviews.map(r => r.review_id) };
 }
 
-module.exports = { latestChemistry, requireFresh, simulationReleaseEvidence, sampleForHeat };
+module.exports = { latestChemistry, requireFresh, simulationReleaseEvidence, operationalReleaseEvidence, sampleForHeat };

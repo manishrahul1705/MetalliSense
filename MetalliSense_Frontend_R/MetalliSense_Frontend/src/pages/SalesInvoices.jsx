@@ -9,6 +9,7 @@ import Button from "../components/common/Button";
 import { MeltSpinner } from "../components/common/FurnaceLoader";
 import { errMsg, inputCls } from "../components/premelt/premeltUi";
 import { getFinishedHeats, getInvoices, getInvoice, getCustomers, createInvoice, getCertificate } from "../services/salesService";
+import MassBalance from '../components/premelt/MassBalance';
 
 const n = (v, dp = 0) => (v === null || v === undefined ? "—" : Number(v).toLocaleString("en-IN", { minimumFractionDigits: dp, maximumFractionDigits: dp }));
 const rs = (v, dp = 0) => (v === null || v === undefined ? "—" : `₹${n(v, dp)}`);
@@ -86,7 +87,7 @@ function InvoiceDoc({ inv }) {
               <td className="py-3">{i + 1}</td>
               <td className="py-3 pr-4">{l.description}</td>
               <td className="py-3 px-3 font-mono">{l.hsn}</td>
-              <td className="py-3 px-3 text-right tabular-nums whitespace-nowrap">{n(l.qtyKg)} {l.unit}</td>
+              <td className="py-3 px-3 text-right tabular-nums whitespace-nowrap">{n(l.qtyKg, 3)} {l.unit}</td>
               <td className="py-3 px-3 text-right tabular-nums whitespace-nowrap">{n(l.rate, 2)}</td>
               <td className="py-3 text-right tabular-nums whitespace-nowrap">{n(l.amount, 2)}</td>
             </tr>
@@ -107,7 +108,7 @@ function InvoiceDoc({ inv }) {
               <tr><td className="py-1 text-metal-600">IGST {inv.gstPct}%</td><td className="text-right">{n(inv.igst, 2)}</td></tr>
             )}
             <tr><td className="py-1 text-metal-600">Round off</td><td className="text-right">{n(inv.roundOff, 2)}</td></tr>
-            <tr className="border-t-2 border-metal-900 font-black text-[14px]"><td className="py-2">Total</td><td className="text-right">₹{n(inv.total)}</td></tr>
+            <tr className="border-t-2 border-metal-900 font-black text-[14px]"><td className="py-2">Total</td><td className="text-right">₹{n(inv.total, 2)}</td></tr>
           </tbody>
         </table>
       </div>
@@ -150,7 +151,7 @@ function CertificateDoc({ c }) {
       </div>
 
       <div className="grid grid-cols-4 gap-3 py-4 border-b border-metal-200">
-        {[["Heat no.", c.heatId], ["Grade ordered", c.gradeLabel], ["Castings", `${n(c.castingsKg)} kg`], ["Customer", c.customer?.name || "—"]].map(([k, v]) => (
+        {[["Heat no.", c.heatId], ["Grade ordered", c.gradeLabel], ["Castings", `${n(c.castingsKg, 3)} kg`], ["Customer", c.customer?.name || "—"]].map(([k, v]) => (
           <div key={k}><p className="text-[10.5px] uppercase tracking-wider text-metal-500 font-bold">{k}</p><p className="font-bold">{v}</p></div>
         ))}
       </div>
@@ -189,6 +190,7 @@ function CertificateDoc({ c }) {
         </tbody>
       </table>
       <p className="text-[11px] text-metal-500 mt-1">{c.mechanical.basis}.</p>
+      <MassBalance balance={c.massBalance} addition={c.additionBalance} />
 
       <p className="mt-5 font-bold uppercase tracking-wider text-[11px]">3. Raw material traceability</p>
       <table className="w-full mt-1 tabular-nums">
@@ -205,7 +207,7 @@ function CertificateDoc({ c }) {
 
       <div className="grid grid-cols-2 gap-6 mt-8 pt-4 border-t border-metal-200">
         <div className="text-[11.5px] text-metal-600">
-          <p>We certify that the castings above were made from heat {c.heatId} and tested as stated.</p>
+          <p>{c.executionContext === 'SIMULATION' ? 'This certificate records a simulated batch and hypothetical QA results; no physical castings or laboratory tests are certified.' : `We certify that the castings above were made from heat ${c.heatId} and tested as stated.`}</p>
           {c.invoiceId && <p>Invoice: <span className="font-mono">{c.invoiceId}</span></p>}
         </div>
         <div className="text-right">
@@ -314,7 +316,7 @@ function InvoiceDialog({ heat, customers, onClose, onCreated }) {
           <div className="rounded-xl bg-metal-50 border border-metal-200 px-4 py-3 text-sm tabular-nums">
             <div className="flex justify-between"><span className="text-metal-600">Taxable value</span><span>{rs(taxable, 2)}</span></div>
             <div className="flex justify-between"><span className="text-metal-600">{intra ? "CGST 9% + SGST 9%" : "IGST 18%"} <span className="text-[11px]">({intra ? "same state" : "other state"})</span></span><span>{rs(gst, 2)}</span></div>
-            <div className="flex justify-between font-black text-base border-t border-metal-200 mt-1 pt-1"><span>Total</span><span>{rs(Math.round(taxable + gst))}</span></div>
+            <div className="flex justify-between font-black text-base border-t border-metal-200 mt-1 pt-1"><span>Total</span><span>{rs(taxable + gst, 2)}</span></div>
           </div>
         </div>
         <div className="flex justify-end gap-2 px-5 pb-5">
@@ -416,8 +418,8 @@ export default function SalesInvoices() {
                         <td className="px-2 py-3 font-mono font-bold">{h.heatId}</td>
                         <td className="px-2">{h.gradeLabel}{h.tap.result === "DOWNGRADED" && <span className="block text-[11px] text-amber-700">sold as {gl(h.tap.soldGrade)}</span>}</td>
                         <td className="px-2">{h.tap.result === "PASS" ? <Chip ok><CheckCircle2 size={11} className="mr-1" />Pass</Chip> : <Chip><AlertTriangle size={11} className="mr-1" />Downgraded</Chip>}</td>
-                        <td className="px-2 text-right tabular-nums">{n(h.tap.castingsKg)} kg</td>
-                        <td className="px-2 text-right tabular-nums text-metal-500">{n(h.tap.returnsKg)} kg<span className="block text-[10.5px] font-mono">{h.tap.returnsLotId}</span></td>
+                        <td className="px-2 text-right tabular-nums">{n(h.tap.castingsKg, 3)} kg</td>
+                        <td className="px-2 text-right tabular-nums text-metal-500">{n(h.tap.returnsKg, 3)} kg<span className="block text-[10.5px] font-mono">{h.tap.returnsLotId}</span></td>
                         <td className="px-2 text-right tabular-nums">{rs(h.margin?.revenueRs)}<span className="block text-[10.5px] text-metal-400">₹{n(h.tap.sellingRsPerKg, 2)}/kg</span></td>
                         <td className="px-2 text-right tabular-nums" title={h.margin?.note}>
                           <b className={h.margin?.marginRs >= 0 ? "text-emerald-700" : "text-red-700"}>{rs(h.margin?.marginRs)}</b>

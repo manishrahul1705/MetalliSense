@@ -539,7 +539,7 @@ async function run() {
           backendProc.kill('SIGKILL');
         }
       }
-    } catch (_) {}
+    } catch (_) { /* Preserve the failed run if process cleanup also fails. */ }
   }
 
   const outputPath = path.join(EVIDENCE_DIR, 'REAL_LIFECYCLE_E2E_REPORT.json');

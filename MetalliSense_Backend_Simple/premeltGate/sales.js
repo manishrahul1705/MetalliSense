@@ -21,8 +21,7 @@ const { transitionHeat, HEAT_STATES } = require('./heatStateMachine');
 const {
   EVIDENCE_TYPES,
   evaluateChemistryStrict,
-  evaluateMechanicalStrict,
-  recordEvidence
+  evaluateMechanicalStrict
 } = require('./evidenceEngine');
 
 const err = (status, message, extra = {}) => Object.assign(new Error(message), { status, ...extra });
@@ -167,16 +166,18 @@ function completeHeatTransaction(heatId, body = {}, currentUser = null) {
   // Chemistry evidence validation (S0-001)
   const simulated = heat.executionContext === 'SIMULATION';
   if (simulated && !currentUser) throw err(403, 'Authenticated independent human QA is required for simulation release');
-  const simulatedEvidence = simulated ? require('./simulationEvidence').simulationReleaseEvidence(heat) : null;
-  const composition = simulated ? JSON.parse(simulatedEvidence.chemistry.values_json) : (body.composition || heat.finalChemistry);
-  const chemEvidenceType = body.chemEvidenceType || EVIDENCE_TYPES.MELT_MEASURED;
+  const simulatedEvidence = simulated ? require('./simulationEvidence').simulationReleaseEvidence(heat)
+    : require('./simulationEvidence').operationalReleaseEvidence(heat);
+  const composition = JSON.parse(simulatedEvidence.chemistry.values_json);
+  const chemEvidenceType = simulated ? EVIDENCE_TYPES.MELT_MEASURED : simulatedEvidence.chemistry.evidence_type;
 
   const chemResult = evaluateChemistryStrict(heat.grade, composition, chemEvidenceType);
 
   // Mechanical evidence validation (S0-001)
-  const mechEvidenceType = body.mechEvidenceType || EVIDENCE_TYPES.LAB_MEASURED;
-  const mechanical = simulated ? JSON.parse(simulatedEvidence.lab.values_json) : body.mechanical;
-  const standard = simulated ? require('./simulationStandards')[heat.grade] : body.standard;
+  const mechEvidenceType = EVIDENCE_TYPES.LAB_MEASURED;
+  const mechanical = JSON.parse(simulatedEvidence.lab.values_json);
+  const standard = { ...require('./simulationStandards')[heat.grade] };
+  if (!simulated && standard.ref) standard.ref = standard.ref.replace(' (simulation)', ' (prototype thresholds)');
   const mechResult = evaluateMechanicalStrict(heat.grade, mechanical, standard, mechEvidenceType);
   if (simulated) {
     chemResult.provenance = 'SIMULATED_MEASURED';
@@ -184,37 +185,14 @@ function completeHeatTransaction(heatId, body = {}, currentUser = null) {
     if (!chemResult.pass || !mechResult.pass) throw err(422, 'Simulation release requires passing corrected chemistry and final QA');
   }
 
-  // Record immutable evidence records in the evidence table
-  if (!simulated) recordEvidence({
-    heatId,
-    evidenceType: chemEvidenceType,
-    values: composition,
-    sourceInstrument: body.spectrometerInstrument || 'ARL_3460_OES',
-    units: '%',
-    provenance: chemEvidenceType,
-    specVersion: chemResult.specificationSource,
-    actor: engineerName
-  });
-
-  if (!simulated && body.mechanical && Object.keys(body.mechanical).length > 0) {
-    recordEvidence({
-      heatId,
-      evidenceType: mechEvidenceType,
-      values: body.mechanical,
-      sourceInstrument: body.tensileTestingMachine || 'UNIVERSAL_TENSILE_TESTER',
-      units: 'MPa, %, HB',
-      provenance: mechEvidenceType,
-      specVersion: mechResult.standard,
-      actor: engineerName
-    });
-  }
-
   const currentSettings = loadSettings();
   const chargeKg = (heat.charge || []).reduce((s, l) => s + Number(l.kg), 0);
   const metalKg = simulated ? require('./simulationEvidence').sampleForHeat(heatId).bathMassKg
     : (Number(heat.gate?.prediction?.metalKg) || (chargeKg > 0 ? chargeKg * 0.95 : Number(heat.targetKg || 1000) * 0.95));
-  const castingsKg = round(metalKg * (currentSettings.castingYieldPct / 100), 0);
-  const returnsKg = round(metalKg * (currentSettings.returnsPct / 100), 0);
+  const massBalance = require('./massAccounting').allocateBath(metalKg, currentSettings);
+  if (massBalance.unallocatedKg !== 0) throw err(422, 'Complete the mass allocation before release; unallocated bath mass remains');
+  const { castingsKg, returnsKg } = massBalance;
+  const additionBalance = simulated ? require('./simulationEvidence').sampleForHeat(heatId) : null;
 
   // Downgrade if chemistry or mechanical properties failed
   const ok = chemResult.pass && mechResult.pass;
@@ -225,21 +203,25 @@ function completeHeatTransaction(heatId, body = {}, currentUser = null) {
   const tapRecord = {
     executionContext: heat.executionContext,
     artifactLabel: simulated ? 'SIMULATION — NOT FOR PRODUCTION OR COMMERCIAL USE' : null,
-    evidenceReceipts: simulated ? [simulatedEvidence.chemistry.evidence_id, simulatedEvidence.lab.evidence_id] : [],
+    evidenceReceipts: [simulatedEvidence.chemistry.evidence_id, simulatedEvidence.lab.evidence_id],
     at: new Date().toISOString(),
     approvedBy: engineerName,
+    approvedById: currentUser?.userId || null,
     result: ok ? 'PASS' : 'DOWNGRADED',
     soldGrade,
     sellingRsPerKg: round(pricePerT / 1000, 2),
     downgradeNote: ok ? null : (down ? `Downgraded from ${heat.grade} to ${soldGrade} (loss ₹${down.lossPerTon.toLocaleString('en-IN')}/t)` : 'Off-spec — sold as scrap'),
-    metalKg: round(metalKg, 0),
+    metalKg: massBalance.bathKg,
     castingsKg,
     returnsKg,
-    lossKg: Math.max(0, round(metalKg - castingsKg - returnsKg, 0)),
+    lossKg: massBalance.processLossKg,
+    massBalance,
+    additionBalance,
     materialBalanceCheck: {
-      accountedKg: round(castingsKg + returnsKg + Math.max(0, metalKg - castingsKg - returnsKg), 0),
-      balancePct: round(((castingsKg + returnsKg + Math.max(0, metalKg - castingsKg - returnsKg)) / metalKg) * 100, 1),
-      conserved: Math.abs((castingsKg + returnsKg + Math.max(0, metalKg - castingsKg - returnsKg)) - metalKg) < 1.0
+      accountedKg: massBalance.accountedKg,
+      differenceKg: massBalance.differenceKg,
+      balancePct: massBalance.conserved ? 100 : null,
+      conserved: massBalance.conserved
     },
     chemistry: chemResult,
     mechanical: mechResult,
@@ -321,10 +303,8 @@ function certificateTransaction(heatId) {
 
   const currentSettings = loadSettings();
   const db = getDb();
-  if (heat.executionContext === 'SIMULATION') {
-    const saved = db.prepare("SELECT payload_json FROM simulation_artifacts WHERE heat_id = ? AND kind = 'CERTIFICATE'").get(heatId);
-    if (saved) return JSON.parse(saved.payload_json);
-  }
+  const saved = db.prepare("SELECT payload_json FROM simulation_artifacts WHERE heat_id = ? AND kind = 'CERTIFICATE'").get(heatId);
+  if (saved) return JSON.parse(saved.payload_json);
   const invRow = db.prepare('SELECT * FROM invoices WHERE heat_id = ? AND status != ?').get(heatId, 'CANCELLED');
   const inv = invRow ? { invoiceId: invRow.invoice_id, customer: CUSTOMERS.find((c) => c.id === invRow.customer_id) } : null;
 
@@ -362,6 +342,8 @@ function certificateTransaction(heatId) {
     soldGrade: heat.tap.soldGrade,
     downgradeNote: heat.tap.downgradeNote,
     castingsKg: heat.tap.castingsKg,
+    massBalance: heat.tap.massBalance,
+    additionBalance: heat.tap.additionBalance,
     chemistry: heat.tap.chemistry,
     mechanical: heat.tap.mechanical,
     gate: {
@@ -373,7 +355,7 @@ function certificateTransaction(heatId) {
     approvedBy: heat.tap.approvedBy,
     startedBy: heat.start?.by || null,
   };
-  if (heat.executionContext === 'SIMULATION') db.prepare('INSERT INTO simulation_artifacts (artifact_id, heat_id, kind, payload_json, created_at) VALUES (?, ?, ?, ?, ?)')
+  db.prepare('INSERT INTO simulation_artifacts (artifact_id, heat_id, kind, payload_json, created_at) VALUES (?, ?, ?, ?, ?)')
     .run(result.certificateNo, heatId, 'CERTIFICATE', JSON.stringify(result), new Date().toISOString());
   return result;
 }
@@ -490,6 +472,7 @@ function createInvoiceTransaction(body = {}, currentUser = null) {
     total,
     issuedAt: nowIso,
     createdBy: creatorName,
+    createdById: creatorId,
     status: 'ACTIVE',
     lines: [{ description: `${gradeLabel(heat.tap.soldGrade)} Castings`, qtyKg, ratePerKg: rate, taxableRs: taxable,
       rate, amount: taxable, unit: 'kg', hsn: currentSettings.hsn[heat.tap.soldGrade] || '73259920' }]
@@ -513,8 +496,8 @@ function createInvoiceTransaction(body = {}, currentUser = null) {
   );
 
   store.log('INVOICE_ISSUED', invId, invRecord.createdBy, `${heat.heatId}: ${qtyKg} kg to ${customer.name}, ₹${total.toLocaleString('en-IN')}`);
-  if (heat.executionContext === 'SIMULATION') certificate(heat.heatId);
-  if (heat.executionContext === 'SIMULATION') db.prepare('INSERT INTO simulation_artifacts (artifact_id, heat_id, kind, payload_json, created_at) VALUES (?, ?, ?, ?, ?)')
+  certificate(heat.heatId);
+  db.prepare('INSERT INTO simulation_artifacts (artifact_id, heat_id, kind, payload_json, created_at) VALUES (?, ?, ?, ?, ?)')
     .run(invId, heat.heatId, 'INVOICE', JSON.stringify(invRecord), nowIso);
   return invRecord;
 }

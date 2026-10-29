@@ -689,6 +689,12 @@ async function run() {
       });
 
       // Admin attempts to release their own heat -> MUST BE REJECTED 403 MAKER_CHECKER_VIOLATION
+      // Final QA is now a separately persisted, chemistry/version-bound receipt.
+      await request('POST', `/api/v2/premelt/heats/${plannedHeatId}/evidence`, {
+        headers: { Cookie: cookieHeader(qmCookies), 'X-CSRF-Token': qmCookies['metallisense_csrf'] },
+        body: { evidenceType: 'LAB_MEASURED', units: 'MPa, %, HB',
+          values: { uts_mpa: 450, hardness_hb: 180, elongation_pct: 12, ys_mpa: 310 } }
+      });
       const selfReleaseRes = await request('POST', `/api/v2/sales/heats/${plannedHeatId}/complete`, {
         headers: {
           Cookie: cookieHeader(adminCookies),

@@ -39,7 +39,7 @@ export const AuthProvider = ({ children }) => {
   const logout = async () => {
     try {
       await api.post("/auth/logout");
-    } catch (_) {}
+    } catch (_) { /* Clear local session even if the server is unavailable. */ }
     setUser(null);
   };
 

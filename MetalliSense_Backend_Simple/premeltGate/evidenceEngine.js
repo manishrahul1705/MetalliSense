@@ -73,6 +73,8 @@ function getEvidenceForHeat(heatId) {
   return rows.map((r) => ({
     evidenceId: r.evidence_id,
     executionContext: r.execution_context,
+    heatVersion: r.heat_version,
+    parentEvidenceId: r.parent_evidence_id,
     heatId: r.heat_id,
     evidenceType: r.evidence_type,
     values: JSON.parse(r.values_json),

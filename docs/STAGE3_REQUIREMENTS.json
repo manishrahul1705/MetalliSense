@@ -1,0 +1,23 @@
+{
+  "startingHead": "5ed0cf8faff12a25c24e95369fc465200bb665bc",
+  "startingTree": "f53b7bf0c364a6170f5d534ba85b4178c4ca2082",
+  "scope": "Isolated human-approved prototype workflows and service authorization; physical commissioning and industrial model validity excluded",
+  "requirements": [
+    {"id":"R01","requirement":"Preserve branch, unrelated model/caches, protected refs and prior evidence","source":"Stage 3 boundaries/preflight","status":"PASS","receipt":"preflight.json; original model SHA-256 1044e9e701ed9a937b3f1b4f18bc96c68a2823994a5b6c6a8646a8ca6080fef3"},
+    {"id":"R02","requirement":"Full-precision material conservation and explicit rounding/recovery residuals","source":"Stage 2 ui-final/inventory-material-reconciliation.json, tree f53b7bf0c364a6170f5d534ba85b4178c4ca2082","status":"FAIL","defect":"D01: persisted 964 kg outputs did not account for 0.47462 kg; 1 kg conservation tolerance masked discrepancy"},
+    {"id":"R03","requirement":"Working JS/JSX lint across application, mock and test code","source":"Stage 1/2 handoffs and lint-baseline/stdout-stderr.log","status":"FAIL","defect":"D02: missing ESLint flat config; lint exit 2"},
+    {"id":"R04","requirement":"Release from persisted heat/version/sample-bound evidence","source":"premeltGate/sales.js completeHeat; simulationEvidence.js","status":"FAIL","defect":"D03: operational release manufactured physical evidence from request body; simulation QA used timestamp linkage only"},
+    {"id":"R05","requirement":"Permanent simulation isolation and no operational cross-authorization","source":"Stage 2 context/evidence assertions","status":"UNEXECUTED","receipt":"Must rerun on Stage 3 candidate; prior-tree receipts are historical only"},
+    {"id":"R06","requirement":"Stable provenance-labelled document snapshots under configuration changes","source":"premeltGate/sales.js certificate/createInvoice/getInvoice","status":"UNEXECUTED"},
+    {"id":"R07","requirement":"Exactly-once charge, additions, release and invoice; partial rollback and restart","source":"Stage 2 real browser assertions","status":"UNEXECUTED"},
+    {"id":"R08","requirement":"Sanitized missing-provider explanation and session preservation; separate external-provider fixture","source":"Stage 1 proxy/UI assertions","status":"BLOCKED","limitation":"Live provider unavailable unless legitimate existing configuration is present; contract/session checks remain mandatory"},
+    {"id":"R09","requirement":"Complete source/runtime mutation route inventory including aliases and Python mounts","source":"Historical COMPLETE_ROUTE_INVENTORY.json: 143 endpoints / 73 mutation declarations; original 101 claim requires reconciliation, not README substitution","status":"UNEXECUTED"},
+    {"id":"R10","requirement":"Execute complete independent expected-role matrix, denied state invariance and downstream counts","source":"Stage 3 Phase B item 9","status":"UNEXECUTED"},
+    {"id":"R11","requirement":"Affected backend/security/concurrency/syntax regressions","source":"Stage 3 Phase B item 10","status":"UNEXECUTED"},
+    {"id":"R12","requirement":"Frontend tests, lint, production/mock builds and affected responsive/keyboard checks","source":"Stage 3 Phase B item 10","status":"UNEXECUTED"},
+    {"id":"R13","requirement":"Exact frozen candidate, fresh lockfile installs and separate declared Python environments","source":"Stage 3 Phase B item 8","status":"UNEXECUTED"},
+    {"id":"R14","requirement":"Read-only frozen audit: report any new defect without source repair","source":"Stage 3 Phase B boundary","status":"UNEXECUTED"},
+    {"id":"R15","requirement":"Secret/generated artifact scans, accurate claims, hashed evidence and final cleanup","source":"Stage 3 evidence and cleanup requirements","status":"UNEXECUTED"},
+    {"id":"R16","requirement":"Prior optical zoom checks retained solely as owner-reported","source":"Original audit report, native browser zoom owner check","status":"PASS","classification":"OWNER-REPORTED MANUAL PASS; not newly executed, no WCAG certification claim"}
+  ]
+}

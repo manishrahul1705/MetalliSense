@@ -503,6 +503,7 @@ router.post('/heats/:heatId/evidence', requireAuth, wrap((req) => withTransactio
   const b = req.body || {};
   const values = b.values || b.readings;
   const { evidenceType, sampleId, sourceInstrument, units = '%', specVersion = '1.0' } = b;
+  let parentEvidenceId = null;
   if (!evidenceType || !values) {
     throw bad(400, 'evidenceType and values are required');
   }
@@ -551,6 +552,15 @@ router.post('/heats/:heatId/evidence', requireAuth, wrap((req) => withTransactio
     require('./compositionValidation').validateComposition(values);
     if (units !== '%') throw bad(422, 'Chemistry evidence units must be %');
   }
+  if (['LAB_MEASURED', 'SIMULATED_LAB'].includes(evidenceType)) {
+    if (units !== 'MPa, %, HB') throw bad(422, 'Laboratory units must be MPa, %, HB');
+    for (const key of ['uts_mpa', 'ys_mpa', 'elongation_pct', 'hardness_hb']) {
+      if (typeof values[key] !== 'number' || !Number.isFinite(values[key]) || values[key] <= 0) throw bad(422, `A finite positive ${key} is required`);
+    }
+    const chemistry = requireFresh(latestChemistry(heatId));
+    if (chemistry.heat_version !== heat.version) throw bad(409, 'Chemistry sample belongs to an earlier heat version');
+    parentEvidenceId = chemistry.evidence_id;
+  }
   if (req.service && !(req.service.permittedEvidence || []).includes(evidenceType)) throw bad(403, 'Evidence type is outside service scope');
 
   const actorId = req.actor ? req.actor.id : 'ANONYMOUS';
@@ -583,12 +593,12 @@ router.post('/heats/:heatId/evidence', requireAuth, wrap((req) => withTransactio
     INSERT INTO evidence (
       evidence_id, heat_id, evidence_type, values_json, source_instrument,
       units, provenance, spec_version, actor, created_at, is_valid,
-      sample_id, payload_hash, ingested_by_service
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+      sample_id, payload_hash, ingested_by_service, heat_version, parent_evidence_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
   `).run(
     evidenceId, heatId, evidenceType, JSON.stringify(values), instrument,
     units, evidenceType === 'SIMULATED_LAB' ? 'SIMULATED_LAB_QA' : (req.service ? 'SERVICE_AUTHENTICATED' : 'LAB_OPERATOR_AUTHENTICATED'),
-    specVersion, actorId, now, sampleId || null, payloadHash, req.service ? req.service.serviceId : null
+    specVersion, actorId, now, sampleId || null, payloadHash, req.service ? req.service.serviceId : null, heat.version, parentEvidenceId
   );
 
   store.log('EVIDENCE_RECORDED', heatId, actorId, `${evidenceType}: sample ${sampleId || 'N/A'}`);
