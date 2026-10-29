@@ -1,6 +1,7 @@
 /**
  * MetalliSense — Simple Backend
- * No login, no database. Everything is served from dataset.csv in memory.
+ * Session authentication and durable SQLite business/evidence/document storage.
+ * CSV reference data and bounded local prototype workflows.
  * This is a separate, standalone backend from your original project.
  */
 const path = require('path');
@@ -1475,7 +1476,7 @@ app.use((req, res) => {
 // (or a duplicate launch) is already bound to the requested port.
 function startServer(startPort, attemptsLeft = 10) {
   const server = app.listen(startPort, () => {
-    console.log(`MetalliSense Simple Backend running on port ${startPort} (no login, no database — CSV only)`);
+    console.log(`MetalliSense Simple Backend running on port ${startPort} (session authentication; durable SQLite; local prototype)`);
     if (startPort !== port) {
       console.log(`NOTE: Port ${port} was already in use, so this server is running on ${startPort} instead.`);
       console.log(`Update your frontend's VITE_API_BASE_URL to http://localhost:${startPort}/api/v2 if needed.`);

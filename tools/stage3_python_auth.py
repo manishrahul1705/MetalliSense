@@ -15,6 +15,12 @@ import secrets
 import shutil
 import sys
 
+# Imported service modules log Unicode symbols during initialization. Explicitly
+# encode redirected Windows logs as UTF-8; do not change probe expectations.
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, 'reconfigure'):
+        stream.reconfigure(encoding='utf-8')
+
 p=argparse.ArgumentParser()
 p.add_argument('--service',choices=['AI','AGENT','VECTOR'],required=True)
 p.add_argument('--routes',required=True)

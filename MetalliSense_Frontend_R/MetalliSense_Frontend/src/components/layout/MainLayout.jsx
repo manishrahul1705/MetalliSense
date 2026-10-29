@@ -47,7 +47,7 @@ const MainLayout = () => {
             Welcome to MetalliSense! 
           </h2>
           <p className="text-metal-600">
-            MetalliSense is an industrial-grade metal analysis and quality
+            MetalliSense is a local prototype for metal analysis and quality
             control system that integrates with OPC UA servers for real-time
             spectrometer readings.
           </p>

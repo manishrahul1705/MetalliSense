@@ -229,13 +229,11 @@ function csrfProtection(req, res, next) {
     return next();
   }
 
-  // Requests authenticated via Bearer token are immune to CSRF
-  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
-    return next();
-  }
-
-  // Only check CSRF if session cookie is being used to authenticate
-  if (req.cookies && req.cookies.metallisense_session) {
+  // Authenticate chooses the principal before this middleware runs. A raw
+  // Authorization header cannot override cookie precedence or grant an exemption.
+  // Successful bearer authentication carries no ambient cookie authority;
+  // route guards still enforce authentication, RBAC and human/service separation.
+  if (req.actor && req.actor.via === 'SESSION_COOKIE') {
     const csrfHeader = req.headers['x-csrf-token'];
     const csrfCookie = req.cookies.metallisense_csrf;
 

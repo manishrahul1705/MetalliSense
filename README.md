@@ -1,6 +1,6 @@
 # MetalliSense: Intelligent Foundry Decision Support System
 
-MetalliSense is an advanced, human-in-the-loop decision-support platform designed for metal foundries. It unites scrap inspection, pre-melt interlock verification, chemical anomaly detection, machine-learning alloy corrections, contextual-bandit strategy recommendations, and sales quality certification into a unified operational workflow.
+MetalliSense is a local, human-in-the-loop foundry decision-support prototype. It connects material inspection, pre-melt checks, simulated chemistry, correction planning, independent approval, inventory accounting and simulated documents. Verification is bounded to isolated local workflows; it is not industrial qualification or production certification.
 
 ---
 
@@ -10,13 +10,13 @@ The platform operates as a coordinated multi-service architecture:
 
 | Service | Technology | Default Port | Responsibility |
 |---|---|---|---|
-| **Frontend** | React 18, Vite, Tailwind CSS | `5173` | Operator workflows (22 screens), MeltFlowContext, real-time charts |
-| **Backend** | Node.js, Express | `3000` | REST API (101 endpoints), Pre-Melt Gate engine, in-memory business stores |
+| **Frontend** | React 18, Vite, Tailwind CSS | `5173` | Operator workflows, MeltFlowContext, real-time charts |
+| **Backend** | Node.js, Express | `3000` | Session authentication, RBAC, durable SQLite business/evidence/document stores, CSV reference data |
 | **Spectrometer Sim** | Node.js (node-opcua) | `4334` | Simulated OPC UA optical emission spectrometer |
 | **Handheld Gun Sim** | Node.js (node-opcua) | `4335` | Simulated handheld XRF/LIBS yard inspection gun |
 | **AI Service** | Python 3.11, FastAPI | `8000` | IsolationForest anomaly detection, GradientBoosting alloy correction, mechanical models |
 | **Agent Service** | Python 3.11, FastAPI | `8001` | Pre-melt HistGradientBoosting deviation risk, contextual-bandit RL policy, Copilot chat & voice |
-| **Vector Search** | Python 3.11, FastAPI | `8002` | Standalone semantic heat memory (sentence-transformers / cosine fallback) |
+| **Vector Search** | Python 3.11, FastAPI | `8002` | Standalone service; excluded from this audit (including its two mutation routes) |
 
 ---
 
@@ -25,7 +25,7 @@ The platform operates as a coordinated multi-service architecture:
 MetalliSense supports two operational deployment modes:
 
 ### Mode A: Full Multi-Service Microstack
-Connects the React frontend to the live Node.js and Python microservices on `localhost:3000`, `8000`, `8001`, and `8002`.
+Connects the React frontend to Node.js on port `3000`, AI on `8000` and Agent on `8001`. Standalone VectorSearch on `8002` is optional and excluded from this audit: `POST /reindex` and `POST /semantic-search`. Agent vector features (`/vector/reindex`, `/vector/search`, `/vector/memory/add`, `/vector/memory/recall`) are distinct and remain in scope.
 
 ### Mode B: Static Browser Demonstration Mode
 The frontend includes an integrated in-browser mock engine (`src/mock/server.js`) that intercepts all Axios and fetch calls. It executes:
@@ -37,7 +37,7 @@ The frontend includes an integrated in-browser mock engine (`src/mock/server.js`
 To launch the static demo:
 ```bash
 cd MetalliSense_Frontend_R/MetalliSense_Frontend
-npm install
+npm ci
 npm run dev:mock
 ```
 
@@ -45,48 +45,35 @@ npm run dev:mock
 
 ## 3. Getting Started & Startup Instructions
 
-### Prerequisites
-- **Node.js**: `v20.19.0+` or `v22.12.0+` (Node 22 LTS recommended)
-- **Python**: `3.11.x` (Python 3.11 is required for scikit-learn and joblib binary compatibility)
-- **Git**
+Use [docs/TORUN.md](docs/TORUN.md) for PowerShell startup, authentication,
+configuration, database persistence and shutdown commands. Node.js 24.x (verified locally with 24.21.0) with
+`node:sqlite`, Python 3.11 and Git are required. Install Node dependencies with
+`npm ci` and Python dependencies from each service's own `requirements.txt`.
+Do not overwrite an existing configuration or database when setting up.
 
-### Installation
+Human mutations use authenticated sessions, RBAC and CSRF validation. A Bearer
+header does not exempt a request authenticated by cookie. Machine service keys
+are separate from human identities; CORS is not a substitute for CSRF protection.
+SQLite stores persist across restart. CSV reference datasets and some legacy
+analytics caches are separate from the durable business/evidence stores.
 
-1. **Backend**:
-   ```bash
-   cd MetalliSense_Backend_Simple
-   npm install
-   cp config.env.example config.env
-   npm start
-   ```
-2. **AI Service**:
-   ```bash
-   cd MetalliSense_AI_R/MetalliSense_AI
-   py -3.11 -m venv venv
-   .\venv\Scripts\python.exe -m pip install -r requirements.txt
-   .\venv\Scripts\python.exe -X utf8 app\main.py
-   ```
-3. **Agent Service**:
-   ```bash
-   cd MetalliSense_Agent_R/MetalliSense_Agent
-   py -3.11 -m venv venv
-   .\venv\Scripts\python.exe -m pip install -r requirements.txt
-   cp .env.example .env  # Add your Groq / ElevenLabs API keys if using Copilot
-   .\venv\Scripts\python.exe -X utf8 app\main.py
-   ```
-4. **VectorSearch Service (Optional)**:
-   ```bash
-   cd MetalliSense_VectorSearch
-   py -3.11 -m venv venv
-   .\venv\Scripts\python.exe -m pip install -r requirements.txt
-   .\venv\Scripts\python.exe -X utf8 main.py
-   ```
-5. **Frontend**:
-   ```bash
-   cd MetalliSense_Frontend_R/MetalliSense_Frontend
-   npm install
-   npm run dev
-   ```
+Route counts are deliberately omitted here. For reproducible counts use
+`tools/stage3_routes.cjs` (Express declarations versus mounted URLs/aliases) and
+`tools/stage3_python_routes.py` (Python mutation declarations by service). An
+endpoint total must state its methods, mounts, aliases and excluded services.
+
+### Verification limits
+
+- Hardware is PARTIAL/SIMULATED; the lifecycle uses actual OPC UA communication
+  with a simulator, not a commissioned physical instrument.
+- Industrial ML validity is UNVERIFIED; dependency/model-version warnings remain
+  limitations. Do not retrain or overwrite bundled models as a startup step.
+- Live explanations are PROVIDER-BLOCKED without legitimate provider credentials.
+  Fixture-backed contract checks are reported separately from live responses.
+- Browser mock mode is a demonstration, not evidence of durable backend behavior.
+- See the append-only correction handoff for exact tested commit, results and any
+  blocked verification. A passing local lifecycle does not imply unrestricted
+  security clearance or production readiness.
 
 ---
 
