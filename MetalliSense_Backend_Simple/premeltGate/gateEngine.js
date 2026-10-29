@@ -333,6 +333,9 @@ async function runGate(heatId, { by, expectedVersion, version } = {}) {
 
 // ------------------------------------------------------------ interlock
 function startMelting(heatId, { operator, acknowledgeWarnings, override, expectedVersion, version } = {}, currentUser = null) {
+  return require('./db').withTransaction(() => startMeltingTransaction(heatId, { operator, acknowledgeWarnings, override, expectedVersion, version }, currentUser));
+}
+function startMeltingTransaction(heatId, { operator, acknowledgeWarnings, override, expectedVersion, version } = {}, currentUser = null) {
   const heat = store.heats.get(heatId);
   if (!heat) throw err(404, `Heat ${heatId} not found`);
   const expVer = expectedVersion !== undefined ? expectedVersion : version;
@@ -389,6 +392,7 @@ function startMelting(heatId, { operator, acknowledgeWarnings, override, expecte
   // Freeze the energy prediction at furnace start, so later tariff/factor changes do not rewrite it.
   try { heat.energyAtStart = energy.gateSnapshot(heat, gate.decision); } catch { heat.energyAtStart = null; }
   heat.start = {
+    byId: currentUser?.userId || null,
     at: new Date(),
     by: opName,
     mode,

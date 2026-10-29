@@ -283,7 +283,7 @@ function Interlock({ heat, gate, dirty, onStarted, onGatePassed, onContinue }) {
           <Field label="Furnace operator" className="w-56"><input className={inputCls} value={operator} onChange={(e) => setOperator(e.target.value)} placeholder="Name" /></Field>
           <Button size="lg" onClick={() => start(undefined)} loading={busy}
             disabled={!operator || !!blockedBy || gate.decision === "HOLD" || (gate.decision === "WARN" && !ack)}>
-            {gate.decision === "HOLD" ? <><Lock size={18} className="mr-2" />Start melting — locked</> : <><Flame size={18} className="mr-2" />Start melting (reserve stock)</>}
+            {gate.decision === "HOLD" ? <><Lock size={18} className="mr-2" />Start melting — locked</> : <><Flame size={18} className="mr-2" />Start melting (charge stock)</>}
           </Button>
           {gate.decision === "HOLD" && !blockedBy && (
             <button className="text-sm text-red-700 underline underline-offset-2" onClick={() => setShowOverride(!showOverride)}>Engineer override…</button>
@@ -291,7 +291,7 @@ function Interlock({ heat, gate, dirty, onStarted, onGatePassed, onContinue }) {
         </div>
         {gate.decision !== "HOLD" && !blockedBy && (
           <p className="text-xs text-metal-500 mt-2">
-            Stock is <strong>reserved</strong> now. It is permanently <strong>deducted</strong> only after you accept a strategy in the Adaptive Strategy Optimizer.
+            Base charge stock is <strong>deducted at furnace start</strong>. Correction additives are deducted after independent approval and acceptance.
           </p>
         )}
         {showOverride && gate.decision === "HOLD" && (

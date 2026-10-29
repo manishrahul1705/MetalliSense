@@ -8,7 +8,7 @@ import Card from "../components/common/Card";
 import Button from "../components/common/Button";
 import { MeltSpinner } from "../components/common/FurnaceLoader";
 import { errMsg, inputCls } from "../components/premelt/premeltUi";
-import { getFinishedHeats, getInvoices, getCustomers, createInvoice, getCertificate } from "../services/salesService";
+import { getFinishedHeats, getInvoices, getInvoice, getCustomers, createInvoice, getCertificate } from "../services/salesService";
 
 const n = (v, dp = 0) => (v === null || v === undefined ? "—" : Number(v).toLocaleString("en-IN", { minimumFractionDigits: dp, maximumFractionDigits: dp }));
 const rs = (v, dp = 0) => (v === null || v === undefined ? "—" : `₹${n(v, dp)}`);
@@ -45,7 +45,8 @@ function InvoiceDoc({ inv }) {
   const c = typeof inv?.customer === 'string' ? { name: inv.customer } : (inv?.customer || {});
   return (
     <div className="print-area mx-auto w-full max-w-[210mm] bg-white text-metal-900 shadow-xl ring-1 ring-metal-200 p-10 text-[12.5px] leading-relaxed">
-      <DemoBanner seller={s} />
+      {inv.executionContext !== 'SIMULATION' && <DemoBanner seller={s} />}
+      {inv.artifactLabel && <p className="border-2 border-amber-600 p-3 font-bold mb-4">{inv.artifactLabel}</p>}
       <div className="flex justify-between gap-6 border-b-2 border-metal-900 pb-4">
         <div>
           <p className="text-xl font-black tracking-tight">{s.name}</p>
@@ -53,7 +54,7 @@ function InvoiceDoc({ inv }) {
           <p className="text-metal-600">GSTIN: <b className="font-mono">{s.gstin}</b> · {s.phone} · {s.email}</p>
         </div>
         <div className="text-right">
-          <p className="text-2xl font-black tracking-wide">TAX INVOICE</p>
+          <p className="text-2xl font-black tracking-wide">{inv.executionContext === 'SIMULATION' ? 'SIMULATION INVOICE' : 'TAX INVOICE'}</p>
           <p className="font-mono font-bold mt-1">{inv.invoiceId}</p>
           <p className="text-metal-600">Date: {dt(inv.issuedAt)}</p>
           <p className="text-metal-600">Due: {dt(inv.dueAt)}</p>
@@ -133,14 +134,15 @@ function CertificateDoc({ c }) {
   const passAll = c.result === "PASS";
   return (
     <div className="print-area mx-auto w-full max-w-[210mm] bg-white text-metal-900 shadow-xl ring-1 ring-metal-200 p-10 text-[12.5px] leading-relaxed">
-      <DemoBanner seller={c.seller} />
+      {c.executionContext !== 'SIMULATION' && <DemoBanner seller={c.seller} />}
+      {c.artifactLabel && <p className="border-2 border-amber-600 p-3 font-bold mb-4">{c.artifactLabel}</p>}
       <div className="flex justify-between gap-6 border-b-2 border-metal-900 pb-4">
         <div>
           <p className="text-xl font-black tracking-tight">{c.seller.name}</p>
           <p className="text-metal-600 max-w-xs">{c.seller.address}</p>
         </div>
         <div className="text-right">
-          <p className="text-2xl font-black tracking-wide">TEST CERTIFICATE</p>
+          <p className="text-2xl font-black tracking-wide">{c.executionContext === 'SIMULATION' ? 'SIMULATION CERTIFICATE' : 'TEST CERTIFICATE'}</p>
           <p className="text-metal-600">{c.type}</p>
           <p className="font-mono font-bold mt-1">{c.certificateNo}</p>
           <p className="text-metal-600">Issued: {dt(c.issuedAt)}</p>
@@ -154,12 +156,12 @@ function CertificateDoc({ c }) {
       </div>
 
       <div className={clsx("mt-4 rounded-lg border-2 px-4 py-2.5 font-bold", passAll ? "border-emerald-500 bg-emerald-50 text-emerald-900" : "border-amber-500 bg-amber-50 text-amber-900")}>
-        {passAll ? `Result: PASS — conforms to ${c.gradeLabel}` : `Result: DOWNGRADED — ${c.downgradeNote}`}
+        {passAll ? `${c.executionContext === 'SIMULATION' ? 'Simulation result' : 'Result'}: PASS — within ${c.gradeLabel} limits` : `Result: DOWNGRADED — ${c.downgradeNote}`}
       </div>
 
       <p className="mt-5 font-bold uppercase tracking-wider text-[11px]">1. Chemical composition (%)</p>
       <table className="w-full mt-1 tabular-nums">
-        <thead><tr className="border-y border-metal-900 text-left text-[11px] uppercase"><th className="py-1.5">Element</th><th className="text-right">Min</th><th className="text-right">Max</th><th className="text-right">Actual</th><th className="text-right">Result</th></tr></thead>
+        <thead><tr className="border-y border-metal-900 text-left text-[11px] uppercase"><th className="py-1.5">Element</th><th className="text-right">Min</th><th className="text-right">Max</th><th className="text-right">{c.executionContext === 'SIMULATION' ? 'Simulated' : 'Actual'}</th><th className="text-right">Result</th></tr></thead>
         <tbody>
           {c.chemistry.rows.map((r) => (
             <tr key={r.element} className="border-b border-metal-100">
@@ -219,6 +221,11 @@ function CertificateDoc({ c }) {
 
 function DocViewer({ heatId, invoice, initialTab, onClose }) {
   const [tab, setTab] = useState(initialTab || (invoice ? "invoice" : "certificate"));
+  const [fullInvoice, setFullInvoice] = useState(invoice);
+  useEffect(() => {
+    setFullInvoice(invoice);
+    if (invoice?.executionContext === 'SIMULATION') getInvoice(invoice.invoiceId).then(r => setFullInvoice(r.data.data)).catch(e => toast.error(errMsg(e)));
+  }, [invoice]);
   const [cert, setCert] = useState(null);
   useEffect(() => { getCertificate(heatId).then((r) => setCert(r.data.data)).catch((e) => toast.error(errMsg(e))); }, [heatId]);
   useEffect(() => {
@@ -244,7 +251,7 @@ function DocViewer({ heatId, invoice, initialTab, onClose }) {
           </div>
         </div>
         <div className="py-8 px-4">
-          {tab === "invoice" && invoice ? <InvoiceDoc inv={invoice} /> : cert ? <CertificateDoc c={cert} /> : <MeltSpinner label="Preparing the certificate…" />}
+          {tab === "invoice" && fullInvoice ? <InvoiceDoc inv={fullInvoice} /> : cert ? <CertificateDoc c={cert} /> : <MeltSpinner label="Preparing the certificate…" />}
         </div>
       </aside>
     </div>,

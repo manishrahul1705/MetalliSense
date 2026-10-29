@@ -13,6 +13,8 @@ import {
 import toast from "react-hot-toast";
 import { formatDate, formatPercentage } from "../utils/formatters";
 import { Trash2 } from "lucide-react";
+import SimulationBatch from '../components/premelt/SimulationBatch';
+import { getPremeltConfig } from '../services/premeltService';
 
 const Spectrometer = () => {
   const { opcStatus } = useContext(OPCContext);
@@ -22,8 +24,10 @@ const Spectrometer = () => {
   const [latestReading, setLatestReading] = useState(null);
   const [loading, setLoading] = useState(false);
   const [requesting, setRequesting] = useState(false);
+  const [simulation, setSimulation] = useState(false);
 
   useEffect(() => {
+    getPremeltConfig().then(r => setSimulation(r.data.data.executionContext === 'SIMULATION')).catch(() => setSimulation(false));
     fetchReadings();
     if (import.meta.env.VITE_MOCK_MODE === 'true') { const timer = setInterval(fetchReadings, 3000); return () => clearInterval(timer); }
   }, []);
@@ -134,6 +138,7 @@ const Spectrometer = () => {
 
   return (
     <div className="space-y-6">
+      {simulation && <SimulationBatch heatId={heatId.trim()} />}
       {/* Control Panel */}
       <Card title="OPC Control Panel">
         <p className="text-sm mb-3">Simulated instrument inputs. These readings do not satisfy physical measurement gates.</p>

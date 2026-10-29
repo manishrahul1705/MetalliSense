@@ -1,9 +1,10 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Outlet } from "react-router-dom";
 import Joyride from "react-joyride";
 import Sidebar from "./Sidebar";
 import TopBar from "./TopBar";
 import { useLocation } from "react-router-dom";
+import { getPremeltConfig } from '../../services/premeltService';
 
 
 const pageTitles = {
@@ -32,6 +33,10 @@ const MainLayout = () => {
   const location = useLocation();
   const title = pageTitles[location.pathname] || "MetalliSense";
   const [runTour, setRunTour] = useState(false);
+  const [simulation, setSimulation] = useState(false);
+  useEffect(() => {
+    getPremeltConfig().then(r => setSimulation(r.data.data.executionContext === 'SIMULATION')).catch(() => setSimulation(false));
+  }, []);
 
   const tourSteps = [
     {
@@ -94,6 +99,7 @@ const MainLayout = () => {
       <Sidebar setRunTour={setRunTour} />
       <div className="flex-1 ml-0 sm:ml-72 flex flex-col overflow-hidden min-w-0">
         <TopBar title={title} />
+        {simulation && <div className="bg-amber-100 border-y-2 border-amber-600 px-4 py-2 text-sm font-bold text-amber-950">SIMULATION — isolated prototype inventory and documents. No physical or commercial release.</div>}
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 min-w-0">
           <Outlet />
         </main>

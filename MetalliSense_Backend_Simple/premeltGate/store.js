@@ -51,6 +51,7 @@ function parseLotRow(row) {
   if (!row) return null;
   return {
     lotId: row.lot_id,
+    executionContext: row.execution_context,
     materialType: row.material_type,
     description: row.description,
     alloyName: row.alloy_name,
@@ -308,6 +309,7 @@ function listMovements(lotId) {
   }
   return rows.map((r) => ({
     id: r.id,
+    executionContext: r.execution_context,
     lotId: r.lot_id,
     type: r.type,
     kg: r.kg,
@@ -327,6 +329,7 @@ const qa = {
     if (!r) return null;
     return {
       qaId: r.qa_id,
+      executionContext: r.execution_context,
       lotId: r.lot_id,
       sampleId: r.sample_id,
       sampledAt: r.sampled_at ? new Date(r.sampled_at) : null,
@@ -439,6 +442,7 @@ const heats = {
     if (!row) return null;
     return {
       heatId: row.heat_id,
+      executionContext: row.execution_context,
       grade: row.grade,
       targetKg: row.target_kg,
       status: row.status,

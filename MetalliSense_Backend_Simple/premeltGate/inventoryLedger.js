@@ -174,6 +174,7 @@ function deductAdditivesAtomic({ lines, heatId, idempotencyKey, by, note, candid
           code: 'APPROVAL_REQUIRED'
         });
       }
+      if (heatRow.execution_context === 'SIMULATION' && (!candidateId || !candidateHash)) throw err(409, 'Exact saved simulation candidate identity and hash are required');
 
       if (activeApproval.is_consumed === 1) {
         throw err(409, `APPROVAL_ALREADY_CONSUMED: Alloy correction approval '${activeApproval.review_id}' has already been consumed for heat '${targetHeatId}'`, {
@@ -195,11 +196,8 @@ function deductAdditivesAtomic({ lines, heatId, idempotencyKey, by, note, candid
         });
       }
 
-      const latestEv = txDb.prepare(`
-        SELECT sample_id FROM evidence
-        WHERE heat_id = ? AND evidence_type IN ('MELT_MEASURED', 'POST_CORRECTION_MEASURED')
-        ORDER BY rowid DESC LIMIT 1
-      `).get(targetHeatId);
+      const latestEv = require('./simulationEvidence').latestChemistry(targetHeatId, txDb);
+      if (heatRow.execution_context === 'SIMULATION') require('./simulationEvidence').requireFresh(latestEv);
 
       if (activeApproval.evidence_version && latestEv && latestEv.sample_id !== activeApproval.evidence_version) {
         throw err(409, `STALE_APPROVAL_EVIDENCE: Newer chemistry evidence exists (${latestEv.sample_id}) than candidate approval evidence (${activeApproval.evidence_version})`, {
@@ -297,6 +295,7 @@ function deductAdditivesAtomic({ lines, heatId, idempotencyKey, by, note, candid
       if (lotRow.material_type !== 'FERROALLOY') {
         throw err(400, `Lot '${lotId}' is not a FERROALLOY lot (type: ${lotRow.material_type})`);
       }
+      if (heatRow.execution_context === 'SIMULATION' && !['RELEASED', 'RESTRICTED'].includes(lotRow.status)) throw err(409, 'Simulation correction stock is not released');
 
       const availableGrams = getAvailableGrams(txDb, lotId);
       if (demand.grams > availableGrams) {

@@ -219,6 +219,7 @@ function parseHeatRow(row) {
   if (!row) return null;
   return {
     heatId: row.heat_id,
+    executionContext: row.execution_context,
     grade: row.grade,
     targetKg: row.target_kg,
     status: row.status,

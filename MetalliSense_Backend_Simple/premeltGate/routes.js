@@ -21,6 +21,7 @@ const { getDb, withTransaction } = require('./db');
 const sec = require('./security');
 const { requireAuth, requireHuman, requireRole } = require('./authMiddleware');
 const { evaluateCorrectionFeasibility, computeCandidateHash } = require('./correctionFeasibility');
+const { latestChemistry, requireFresh } = require('./simulationEvidence');
 
 const router = express.Router();
 
@@ -58,7 +59,7 @@ const sessionSummary = ({ csv, readings, ...s }) => ({ ...s, readingCount: readi
 // A clean lot that was inspected before the demo starts.
 function seedInspections() {
   const lot = store.getLot('SCR-0912');
-  if (lot && !lot.sessionIds.length) {
+  if (lot && !store.sessions.list(lot.lotId).length) {
     const sim = simulateSession(lot, { device: 'XRF', pieces: 15, sessionNo: 1, startAt: Date.now() - 36 * 3600 * 1000 });
     ingestCsv(toCsv(sim.rows), { inspector: 'M. Karthik (yard)', via: 'OPC_UA_SIMULATOR' });
   }
@@ -198,6 +199,12 @@ router.post('/additives/deduct', requireAuth, requireRole('OPERATOR', 'METALLURG
 }));
 
 // ================================================================ Correction Feasibility & Approval
+router.get('/heats/:heatId/corrections', requireAuth, wrap((req) => {
+  const db = getDb();
+  const candidates = db.prepare('SELECT * FROM correction_candidates WHERE heat_id = ? ORDER BY rowid DESC').all(req.params.heatId);
+  return candidates.map(row => ({ ...JSON.parse(row.payload_json), makerId: row.maker_id,
+    approval: db.prepare("SELECT review_id, checker_id, is_consumed FROM maker_checker_reviews WHERE entity_id = ? AND candidate_id = ? AND decision = 'APPROVED' AND is_superseded = 0 ORDER BY rowid DESC LIMIT 1").get(req.params.heatId, row.candidate_id) || null }));
+}));
 router.post('/corrections/evaluate', requireAuth, requireHuman, wrap((req) => {
   const { heatId, additions, targetGrade } = req.body || {};
   if (!heatId) throw bad(400, 'heatId is required');
@@ -205,22 +212,44 @@ router.post('/corrections/evaluate', requireAuth, requireHuman, wrap((req) => {
   if (!heat) throw bad(404, `Heat ${heatId} not found`);
 
   const db = getDb();
-  const latestEv = db.prepare(`
-    SELECT * FROM evidence 
-    WHERE heat_id = ? AND evidence_type IN ('MELT_MEASURED', 'POST_CORRECTION_MEASURED')
-    ORDER BY rowid DESC LIMIT 1
-  `).get(heatId);
+  const latestEv = latestChemistry(heatId, db);
+  if (heat.executionContext === 'SIMULATION') {
+    requireFresh(latestEv);
+    if (targetGrade && targetGrade !== heat.grade) throw bad(422, 'Correction must use the saved batch grade');
+    if (!Array.isArray(additions) || !additions.length) throw bad(422, 'Correction additions are required');
+    const known = require('./correctionFeasibility').ALLOY_COMPOSITIONS;
+    const seen = new Set();
+    for (const addition of additions) {
+      const lot = store.getLot(addition.lotId);
+      if (!lot || lot.materialType !== 'FERROALLOY' || lot.alloyName !== addition.alloyName || !known[lot.alloyName]
+          || !['RELEASED', 'RESTRICTED'].includes(lot.status) || seen.has(lot.lotId)) throw bad(422, 'Correction requires distinct released lots with matching supported alloy identities');
+      seen.add(lot.lotId);
+    }
+  }
 
   const initialChem = latestEv ? JSON.parse(latestEv.values_json) : (heat.meltdown_chemistry || {});
   const grade = targetGrade || heat.grade;
-  const heatMass = heat.targetKg || 1000;
+  const heatMass = heat.executionContext === 'SIMULATION' ? heat.gate?.prediction?.metalKg : (heat.targetKg || 1000);
+  if (heat.executionContext === 'SIMULATION' && !(heatMass > 0)) throw bad(422, 'A persisted bath mass is required');
 
-  return evaluateCorrectionFeasibility({
+  const result = evaluateCorrectionFeasibility({
     heatMassKg: heatMass,
     initialChemistry: initialChem,
     additions: additions || [],
     targetGrade: grade
   });
+  if (heat.executionContext === 'SIMULATION' && result.feasible) {
+    result.candidateId = `CAND-${crypto.randomUUID()}`;
+    result.heatId = heatId;
+    result.expectedHeatVersion = heat.version;
+    result.evidenceVersion = latestEv.sample_id;
+    result.specVersion = '1.0';
+    result.executionContext = 'SIMULATION';
+    result.additions = additions.map(a => ({ lotId: a.lotId, alloyName: a.alloyName, kg: a.kg }));
+    db.prepare(`INSERT INTO correction_candidates (candidate_id, heat_id, maker_id, heat_version, evidence_version, candidate_hash, payload_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(result.candidateId, heatId, req.user.userId, heat.version, latestEv.sample_id, result.candidateHash, JSON.stringify(result), new Date().toISOString());
+  }
+  return result;
 }));
 
 router.post('/corrections/approve', requireAuth, requireRole('METALLURGIST', 'QUALITY_MANAGER', 'ADMIN'), wrap((req) => {
@@ -243,11 +272,19 @@ router.post('/corrections/approve', requireAuth, requireRole('METALLURGIST', 'QU
   }
 
   // 2. Verify chemistry evidence version matches (Reject if new evidence arrived)
-  const latestEv = db.prepare(`
-    SELECT * FROM evidence 
-    WHERE heat_id = ? AND evidence_type IN ('MELT_MEASURED', 'POST_CORRECTION_MEASURED')
-    ORDER BY rowid DESC LIMIT 1
-  `).get(heatId);
+  const latestEv = latestChemistry(heatId, db);
+  if (heat.execution_context === 'SIMULATION') {
+    requireFresh(latestEv);
+    if (!evidenceVersion || !specVersion || !Array.isArray(additions) || !additions.length) throw bad(422, 'Exact evidence, specification and additions are required');
+    const feasibility = evaluateCorrectionFeasibility({ heatMassKg: JSON.parse(heat.gate_json || '{}').prediction?.metalKg,
+      initialChemistry: JSON.parse(latestEv.values_json), additions, targetGrade: heat.grade });
+    if (!feasibility.feasible) throw bad(422, 'Correction is not feasible', { feasibility });
+    const candidate = db.prepare('SELECT * FROM correction_candidates WHERE candidate_id = ? AND heat_id = ?').get(candidateId, heatId);
+    if (!candidate || candidate.candidate_hash !== candidateHash || candidate.evidence_version !== evidenceVersion
+        || candidate.heat_version !== Number(expectedHeatVersion)) throw bad(409, 'Candidate does not match a saved simulation evaluation');
+    if (candidate.maker_id === req.user.userId) throw bad(403, 'Maker-checker violation: candidate maker cannot approve their own correction');
+    if (db.prepare("SELECT 1 FROM maker_checker_reviews WHERE candidate_id = ? AND decision = 'APPROVED'").get(candidateId)) throw bad(409, 'Candidate has already been approved');
+  }
 
   if (evidenceVersion && latestEv && latestEv.sample_id !== evidenceVersion) {
     throw bad(409, `STALE_APPROVAL: Newer chemistry evidence (${latestEv.sample_id}) exists for heat ${heatId} than candidate evidence (${evidenceVersion}). Re-evaluation required.`, {
@@ -277,7 +314,10 @@ router.post('/corrections/approve', requireAuth, requireRole('METALLURGIST', 'QU
   // 5. Maker-checker separation: approver cannot be the heat planner or candidate maker
   const approverId = req.user ? (req.user.userId || req.user.username) : 'UNKNOWN';
   const approverUsername = req.user?.username || approverId;
-  const effectiveMakerId = req.body?.makerId || heat.planned_by || 'SYSTEM';
+  const effectiveMakerId = heat.execution_context === 'SIMULATION'
+    ? db.prepare('SELECT maker_id FROM correction_candidates WHERE candidate_id = ?').get(candidateId).maker_id
+    : (req.body?.makerId || heat.planned_by || 'SYSTEM');
+  if (heat.execution_context === 'SIMULATION' && [approverId, approverUsername].includes(heat.planned_by)) throw bad(403, 'Maker-checker violation: heat planner cannot approve correction');
   if (
     effectiveMakerId &&
     (effectiveMakerId.toLowerCase() === approverId.toLowerCase() ||
@@ -470,7 +510,18 @@ router.post('/heats/:heatId/evidence', requireAuth, wrap((req) => withTransactio
   if (sourceInstrument !== undefined && (typeof sourceInstrument !== 'string' || !sourceInstrument.trim())) throw bad(422, 'sourceInstrument must be a non-empty string');
 
   // Validate authorized evidence types by caller principal
-  if (evidenceType === 'MELT_MEASURED' || evidenceType === 'POST_CORRECTION_MEASURED') {
+  if (evidenceType === 'SIMULATED_LAB' && heat.executionContext === 'SIMULATION') {
+    if (!req.user || !(req.user.roles || []).some(r => ['QUALITY_MANAGER', 'ADMIN'].includes(r))) throw bad(403, 'Independent human QA is required for simulated laboratory results');
+    if (req.user.userId === heat.plannedBy || req.user.username === heat.plannedBy || req.user.userId === heat.start?.byId) throw bad(403, 'Maker-checker violation: planner or melting operator cannot enter final simulation QA');
+    const standards = require('./simulationStandards');
+    for (const key of ['uts_mpa', 'ys_mpa', 'elongation_pct', 'hardness_hb']) {
+      if (typeof values[key] !== 'number' || !Number.isFinite(values[key]) || values[key] <= 0) throw bad(422, `A finite positive ${key} is required`);
+    }
+    require('./evidenceEngine').evaluateMechanicalStrict(heat.grade, values, standards[heat.grade], 'LAB_MEASURED');
+    if (units !== 'MPa, %, HB') throw bad(422, 'Simulated laboratory units must be MPa, %, HB');
+  } else if (heat.executionContext === 'SIMULATION') {
+    throw bad(422, 'Simulation stores accept OPC simulator chemistry and explicitly simulated laboratory QA only');
+  } else if (evidenceType === 'MELT_MEASURED' || evidenceType === 'POST_CORRECTION_MEASURED') {
     if (req.service) {
       if (req.service.serviceType !== 'SPECTROMETER_SERVICE') {
         throw bad(403, `Service ${req.service.serviceType} is not authorized to submit chemistry evidence`);
@@ -496,7 +547,7 @@ router.post('/heats/:heatId/evidence', requireAuth, wrap((req) => withTransactio
   }
 
   if (!require('./compositionValidation').ELIGIBLE_EVIDENCE_STATES.has(heat.status)) throw bad(409, 'Evidence requires an active heat awaiting measurement or quality review');
-  if (evidenceType !== 'LAB_MEASURED') {
+  if (!['LAB_MEASURED', 'SIMULATED_LAB'].includes(evidenceType)) {
     require('./compositionValidation').validateComposition(values);
     if (units !== '%') throw bad(422, 'Chemistry evidence units must be %');
   }
@@ -536,7 +587,7 @@ router.post('/heats/:heatId/evidence', requireAuth, wrap((req) => withTransactio
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
   `).run(
     evidenceId, heatId, evidenceType, JSON.stringify(values), instrument,
-    units, evidenceType === 'MODEL_ESTIMATE' ? 'MODEL_ESTIMATE' : (req.service ? 'SERVICE_AUTHENTICATED' : 'LAB_OPERATOR_AUTHENTICATED'),
+    units, evidenceType === 'SIMULATED_LAB' ? 'SIMULATED_LAB_QA' : (req.service ? 'SERVICE_AUTHENTICATED' : 'LAB_OPERATOR_AUTHENTICATED'),
     specVersion, actorId, now, sampleId || null, payloadHash, req.service ? req.service.serviceId : null
   );
 
@@ -546,6 +597,7 @@ router.post('/heats/:heatId/evidence', requireAuth, wrap((req) => withTransactio
 
 // ================================================================ misc
 router.get('/config', wrap(() => ({
+  executionContext: require('./simulationContext').context(getDb()),
   settings: config.settings,
   gradeSpecs: config.GRADE_SPECS,
   residualLimits: config.RESIDUAL_LIMITS,

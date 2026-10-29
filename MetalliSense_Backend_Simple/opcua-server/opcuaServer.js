@@ -204,7 +204,7 @@ class SpectrometerOPCUAServer {
         this.deviationPercentage || 10,
       );
 
-      this.currentComposition = synthetic.composition;
+      this.currentComposition = this.simulationSample ? { ...this.simulationSample.composition } : synthetic.composition;
       this.lastReading = {
         ...synthetic,
         temperature: this.generateTemperature(),

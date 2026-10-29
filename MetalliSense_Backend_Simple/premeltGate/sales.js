@@ -92,7 +92,7 @@ const gradeLabel = (g) => String(g || '').split('-').map((w) => w.charAt(0) + w.
 
 // Amount in words (Indian system)
 function inWords(num) {
-  const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+  const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
   const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
   const two = (n) => (n < 20 ? ones[n] : `${tens[Math.floor(n / 10)]}${n % 10 ? ` ${ones[n % 10]}` : ''}`);
   const three = (n) => `${n >= 100 ? `${ones[Math.floor(n / 100)]} Hundred${n % 100 ? ' ' : ''}` : ''}${n % 100 ? two(n % 100) : ''}`;
@@ -117,11 +117,15 @@ function inWords(num) {
  * currentUser: authenticated user from session context (optional, enables server-owned attribution and maker-checker)
  */
 function completeHeat(heatId, body = {}, currentUser = null) {
+  return withTransaction(() => completeHeatTransaction(heatId, body, currentUser));
+}
+
+function completeHeatTransaction(heatId, body = {}, currentUser = null) {
   const heat = store.heats.get(heatId);
   if (!heat) throw err(404, `Heat ${heatId} not found`);
 
   // Idempotency: if already completed and approved, return current view
-  if (heat.status === 'COMPLETED' && heat.tap) {
+  if (['COMPLETED', 'RELEASED'].includes(heat.status) && heat.tap) {
     return heatView(heat);
   }
 
@@ -153,7 +157,7 @@ function completeHeat(heatId, body = {}, currentUser = null) {
     const startedBy = heat.start?.by;
     const currentId = currentUser.userId || currentUser.username;
     if ((plannedBy && (plannedBy === currentId || plannedBy === currentUser.username)) ||
-        (startedBy && (startedBy === currentId || startedBy === currentUser.username))) {
+        (startedBy && (startedBy === currentId || startedBy === currentUser.username)) || heat.start?.byId === currentId) {
       throw err(403, 'Maker-checker violation: The Quality Manager releasing the heat cannot be the same user who planned or started the heat.', {
         code: 'MAKER_CHECKER_VIOLATION'
       });
@@ -161,17 +165,27 @@ function completeHeat(heatId, body = {}, currentUser = null) {
   }
 
   // Chemistry evidence validation (S0-001)
-  const composition = body.composition || heat.finalChemistry;
+  const simulated = heat.executionContext === 'SIMULATION';
+  if (simulated && !currentUser) throw err(403, 'Authenticated independent human QA is required for simulation release');
+  const simulatedEvidence = simulated ? require('./simulationEvidence').simulationReleaseEvidence(heat) : null;
+  const composition = simulated ? JSON.parse(simulatedEvidence.chemistry.values_json) : (body.composition || heat.finalChemistry);
   const chemEvidenceType = body.chemEvidenceType || EVIDENCE_TYPES.MELT_MEASURED;
 
   const chemResult = evaluateChemistryStrict(heat.grade, composition, chemEvidenceType);
 
   // Mechanical evidence validation (S0-001)
   const mechEvidenceType = body.mechEvidenceType || EVIDENCE_TYPES.LAB_MEASURED;
-  const mechResult = evaluateMechanicalStrict(heat.grade, body.mechanical, body.standard, mechEvidenceType);
+  const mechanical = simulated ? JSON.parse(simulatedEvidence.lab.values_json) : body.mechanical;
+  const standard = simulated ? require('./simulationStandards')[heat.grade] : body.standard;
+  const mechResult = evaluateMechanicalStrict(heat.grade, mechanical, standard, mechEvidenceType);
+  if (simulated) {
+    chemResult.provenance = 'SIMULATED_MEASURED';
+    mechResult.provenance = 'SIMULATED_LAB';
+    if (!chemResult.pass || !mechResult.pass) throw err(422, 'Simulation release requires passing corrected chemistry and final QA');
+  }
 
   // Record immutable evidence records in the evidence table
-  recordEvidence({
+  if (!simulated) recordEvidence({
     heatId,
     evidenceType: chemEvidenceType,
     values: composition,
@@ -182,7 +196,7 @@ function completeHeat(heatId, body = {}, currentUser = null) {
     actor: engineerName
   });
 
-  if (body.mechanical && Object.keys(body.mechanical).length > 0) {
+  if (!simulated && body.mechanical && Object.keys(body.mechanical).length > 0) {
     recordEvidence({
       heatId,
       evidenceType: mechEvidenceType,
@@ -197,7 +211,8 @@ function completeHeat(heatId, body = {}, currentUser = null) {
 
   const currentSettings = loadSettings();
   const chargeKg = (heat.charge || []).reduce((s, l) => s + Number(l.kg), 0);
-  const metalKg = Number(heat.gate?.prediction?.metalKg) || (chargeKg > 0 ? chargeKg * 0.95 : Number(heat.targetKg || 1000) * 0.95);
+  const metalKg = simulated ? require('./simulationEvidence').sampleForHeat(heatId).bathMassKg
+    : (Number(heat.gate?.prediction?.metalKg) || (chargeKg > 0 ? chargeKg * 0.95 : Number(heat.targetKg || 1000) * 0.95));
   const castingsKg = round(metalKg * (currentSettings.castingYieldPct / 100), 0);
   const returnsKg = round(metalKg * (currentSettings.returnsPct / 100), 0);
 
@@ -208,6 +223,9 @@ function completeHeat(heatId, body = {}, currentUser = null) {
   const pricePerT = ok ? sellingPrices.getSellingPrice(heat.grade) : (down?.downgradeSellingPricePerTon ?? sellingPrices.SCRAP_PRICE_PER_TON);
 
   const tapRecord = {
+    executionContext: heat.executionContext,
+    artifactLabel: simulated ? 'SIMULATION — NOT FOR PRODUCTION OR COMMERCIAL USE' : null,
+    evidenceReceipts: simulated ? [simulatedEvidence.chemistry.evidence_id, simulatedEvidence.lab.evidence_id] : [],
     at: new Date().toISOString(),
     approvedBy: engineerName,
     result: ok ? 'PASS' : 'DOWNGRADED',
@@ -240,7 +258,7 @@ function completeHeat(heatId, body = {}, currentUser = null) {
         bay: 'Bay 2',
         declared: composition,
       }, engineerName);
-    } catch (_) {}
+    } catch (error) { if (simulated) throw error; }
   }
 
   // Execute explicit state transition with optimistic concurrency to COMPLETED
@@ -271,9 +289,9 @@ function completeHeat(heatId, body = {}, currentUser = null) {
         makerId: heat.plannedBy || 'LEGACY',
         checkerId: currentUser.userId,
         decision: ok ? 'APPROVED' : 'DOWNGRADED',
-        reason: ok ? 'Passing chemistry and physical laboratory evidence verified' : (tapRecord.downgradeNote || 'Downgraded')
+        reason: ok ? (simulated ? 'Simulation chemistry and simulated laboratory QA verified; no physical qualification' : 'Passing chemistry and physical laboratory evidence verified') : (tapRecord.downgradeNote || 'Downgraded')
       });
-    } catch (_) {}
+    } catch (error) { if (simulated) throw error; }
   }
 
   return heatView(updatedHeat);
@@ -281,6 +299,9 @@ function completeHeat(heatId, body = {}, currentUser = null) {
 
 // ------------------------------------------------------------ test certificate
 function certificate(heatId) {
+  return withTransaction(() => certificateTransaction(heatId));
+}
+function certificateTransaction(heatId) {
   const heat = store.heats.get(heatId);
   if (!heat) throw err(404, `Heat ${heatId} not found`);
 
@@ -300,6 +321,10 @@ function certificate(heatId) {
 
   const currentSettings = loadSettings();
   const db = getDb();
+  if (heat.executionContext === 'SIMULATION') {
+    const saved = db.prepare("SELECT payload_json FROM simulation_artifacts WHERE heat_id = ? AND kind = 'CERTIFICATE'").get(heatId);
+    if (saved) return JSON.parse(saved.payload_json);
+  }
   const invRow = db.prepare('SELECT * FROM invoices WHERE heat_id = ? AND status != ?').get(heatId, 'CANCELLED');
   const inv = invRow ? { invoiceId: invRow.invoice_id, customer: CUSTOMERS.find((c) => c.id === invRow.customer_id) } : null;
 
@@ -320,9 +345,12 @@ function certificate(heatId) {
       return { lotId: m.lotId, material: lot?.alloyName || lot?.materialType, supplier: lot?.supplier, kg: -m.kg, status: 'Addition' };
     });
 
-  return {
-    certificateNo: `TC/${fy(new Date(heat.tap.at))}/${heatId}`,
-    type: 'Test certificate (EN 10204 type 3.1 format)',
+  const result = {
+    executionContext: heat.executionContext,
+    artifactLabel: heat.tap.artifactLabel,
+    evidenceReceipts: heat.tap.evidenceReceipts,
+    certificateNo: `${heat.executionContext === 'SIMULATION' ? 'SIM-' : ''}TC/${fy(new Date(heat.tap.at))}/${heatId}`,
+    type: heat.executionContext === 'SIMULATION' ? 'SIMULATION CERTIFICATE — no physical conformity certification' : 'Test certificate (EN 10204 type 3.1 format)',
     issuedAt: heat.tap.at,
     seller: currentSettings.seller,
     customer: inv ? inv.customer : null,
@@ -345,6 +373,9 @@ function certificate(heatId) {
     approvedBy: heat.tap.approvedBy,
     startedBy: heat.start?.by || null,
   };
+  if (heat.executionContext === 'SIMULATION') db.prepare('INSERT INTO simulation_artifacts (artifact_id, heat_id, kind, payload_json, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(result.certificateNo, heatId, 'CERTIFICATE', JSON.stringify(result), new Date().toISOString());
+  return result;
 }
 
 function heatCosts(heat) {
@@ -368,6 +399,7 @@ function heatView(heat) {
 
   return {
     heatId: heat.heatId,
+    executionContext: heat.executionContext,
     grade: heat.grade,
     gradeLabel: gradeLabel(heat.grade),
     status: heat.status,
@@ -392,6 +424,9 @@ function listCompleted() {
 
 // ------------------------------------------------------------ invoices
 function createInvoice(body = {}, currentUser = null) {
+  return withTransaction(() => createInvoiceTransaction(body, currentUser));
+}
+function createInvoiceTransaction(body = {}, currentUser = null) {
   const heat = store.heats.get(body.heatId);
   if (!heat) throw err(404, `Heat ${body.heatId} not found`);
   if (!heat.tap || heat.status !== HEAT_STATES.RELEASED) {
@@ -416,10 +451,10 @@ function createInvoice(body = {}, currentUser = null) {
   const creatorId = currentUser ? currentUser.userId : creatorName;
 
   const qtyKg = body.qtyKg !== undefined && body.qtyKg !== '' ? Number(body.qtyKg) : heat.tap.castingsKg;
-  if (!(qtyKg > 0) || qtyKg > heat.tap.castingsKg) throw err(400, `Quantity must be between 1 and ${heat.tap.castingsKg} kg (castings from this heat)`);
+  if (!Number.isFinite(qtyKg) || !(qtyKg > 0) || qtyKg > heat.tap.castingsKg) throw err(400, `Quantity must be between 1 and ${heat.tap.castingsKg} kg (castings from this heat)`);
 
   const rate = body.ratePerKg !== undefined && body.ratePerKg !== '' ? Number(body.ratePerKg) : heat.tap.sellingRsPerKg;
-  if (!(rate > 0)) throw err(400, 'Rate must be a positive number');
+  if (!Number.isFinite(rate) || !(rate > 0)) throw err(400, 'Rate must be a finite positive number');
 
   const currentSettings = loadSettings();
   const taxable = round(qtyKg * rate, 2);
@@ -427,10 +462,24 @@ function createInvoice(body = {}, currentUser = null) {
   const gstAmount = round((taxable * gst) / 100, 2);
   const total = round(taxable + gstAmount, 2);
 
-  const invId = `INV-${fy()}-${String(Date.now()).slice(-4)}`;
+  const invId = `${heat.executionContext === 'SIMULATION' ? 'SIM-' : ''}INV-${fy()}-${require('node:crypto').randomUUID()}`;
   const nowIso = new Date().toISOString();
 
   const invRecord = {
+    executionContext: heat.executionContext,
+    artifactLabel: heat.tap.artifactLabel,
+    seller: currentSettings.seller,
+    certificateNo: `${heat.executionContext === 'SIMULATION' ? 'SIM-' : ''}TC/${fy(new Date(heat.tap.at))}/${heat.heatId}`,
+    dueAt: new Date(Date.now() + currentSettings.paymentTermsDays * 86400000).toISOString(),
+    paymentTerms: `${currentSettings.paymentTermsDays} days`,
+    intraState: customer.stateCode === currentSettings.seller.stateCode,
+    gstPct: gst,
+    taxable,
+    cgst: customer.stateCode === currentSettings.seller.stateCode ? gstAmount / 2 : 0,
+    sgst: customer.stateCode === currentSettings.seller.stateCode ? gstAmount / 2 : 0,
+    igst: customer.stateCode === currentSettings.seller.stateCode ? 0 : gstAmount,
+    roundOff: 0,
+    totalInWords: inWords(total),
     invoiceId: invId,
     heatId: heat.heatId,
     customerId: customer.id,
@@ -442,7 +491,8 @@ function createInvoice(body = {}, currentUser = null) {
     issuedAt: nowIso,
     createdBy: creatorName,
     status: 'ACTIVE',
-    lines: [{ description: `${gradeLabel(heat.tap.soldGrade)} Castings`, qtyKg, ratePerKg: rate, taxableRs: taxable }]
+    lines: [{ description: `${gradeLabel(heat.tap.soldGrade)} Castings`, qtyKg, ratePerKg: rate, taxableRs: taxable,
+      rate, amount: taxable, unit: 'kg', hsn: currentSettings.hsn[heat.tap.soldGrade] || '73259920' }]
   };
 
   db.prepare(`
@@ -463,6 +513,9 @@ function createInvoice(body = {}, currentUser = null) {
   );
 
   store.log('INVOICE_ISSUED', invId, invRecord.createdBy, `${heat.heatId}: ${qtyKg} kg to ${customer.name}, ₹${total.toLocaleString('en-IN')}`);
+  if (heat.executionContext === 'SIMULATION') certificate(heat.heatId);
+  if (heat.executionContext === 'SIMULATION') db.prepare('INSERT INTO simulation_artifacts (artifact_id, heat_id, kind, payload_json, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(invId, heat.heatId, 'INVOICE', JSON.stringify(invRecord), nowIso);
   return invRecord;
 }
 
@@ -470,6 +523,8 @@ function listInvoices() {
   const db = getDb();
   const rows = db.prepare('SELECT * FROM invoices ORDER BY issued_at DESC').all();
   return rows.map((r) => ({
+    executionContext: r.execution_context,
+    artifactLabel: r.execution_context === 'SIMULATION' ? 'SIMULATION — NOT FOR PRODUCTION OR COMMERCIAL USE' : null,
     invoiceId: r.invoice_id,
     heatId: r.heat_id,
     customerId: r.customer_id,
@@ -486,6 +541,8 @@ function listInvoices() {
 
 function getInvoice(id) {
   const db = getDb();
+  const artifact = db.prepare("SELECT payload_json FROM simulation_artifacts WHERE artifact_id = ? AND kind = 'INVOICE'").get(id);
+  if (artifact) return JSON.parse(artifact.payload_json);
   const r = db.prepare('SELECT * FROM invoices WHERE invoice_id = ?').get(id);
   if (!r) throw err(404, `Invoice ${id} not found`);
   return {

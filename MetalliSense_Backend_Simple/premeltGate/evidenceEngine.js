@@ -72,6 +72,7 @@ function getEvidenceForHeat(heatId) {
   const rows = db.prepare('SELECT * FROM evidence WHERE heat_id = ? AND is_valid = 1 ORDER BY created_at ASC').all(heatId);
   return rows.map((r) => ({
     evidenceId: r.evidence_id,
+    executionContext: r.execution_context,
     heatId: r.heat_id,
     evidenceType: r.evidence_type,
     values: JSON.parse(r.values_json),

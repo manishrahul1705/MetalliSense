@@ -346,7 +346,8 @@ opcRouter.post('/opc-reading', requireAuth, requireRole('OPERATOR', 'METALLURGIS
   if (!metalGrade) return res.status(400).json({ status: 'fail', message: 'Metal grade is required' });
   try {
     spectrometerReadings.eligibleHeat(heatId);
-    const result = await opcuaService.requestSpectrometerReading(metalGrade, deviationElements, deviationPercentage);
+    const simulationSample = heatId ? require('./premeltGate/simulationEvidence').sampleForHeat(heatId) : null;
+    const result = await opcuaService.requestSpectrometerReading(metalGrade, deviationElements, deviationPercentage, simulationSample);
     if (!result.success) return res.status(503).json({ status: 'error', message: 'Simulated spectrometer unavailable' });
     const reading = spectrometerReadings.saveSimulation(result.data, heatId, req.actor.id);
     return res.json({ status: 'success', data: { reading } });

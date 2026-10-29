@@ -21,8 +21,12 @@ function getDefaultDbPath() {
 
 function initDb(dbPath = null) {
   const targetPath = dbPath || getDefaultDbPath();
+  const executionContext = require('./simulationContext').configuredContext(targetPath);
   
   if (currentDb && currentDbPath === targetPath) {
+    if (require('./simulationContext').context(currentDb) !== executionContext) {
+      throw new Error('STORE_CONTEXT_MISMATCH: database context cannot change');
+    }
     return currentDb;
   }
 
@@ -45,6 +49,12 @@ function initDb(dbPath = null) {
   currentDb.exec('PRAGMA synchronous = NORMAL;');
 
   runMigrations(currentDb);
+  try {
+    require('./simulationContext').bindStore(currentDb, executionContext);
+  } catch (error) {
+    closeDb();
+    throw error;
+  }
   if (canBootstrapDevAccounts()) {
     bootstrapDevAccounts(currentDb);
   }

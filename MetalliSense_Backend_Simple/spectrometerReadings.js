@@ -19,18 +19,19 @@ function saveSimulation(reading, heatId, actor) {
     const id = `SIM-${crypto.randomUUID()}`;
     const now = new Date().toISOString();
     const saved = { ...reading, _id: id, sampleId: id, heatId: heatId || null,
+      executionContext: require('./premeltGate/simulationContext').context(db),
       evidenceType: 'SIMULATED_MEASURED', provenance: 'OPC_UA_SIMULATOR',
       sourceInstrument: 'SIMULATED_OES', units: '%', requestedBy: actor, createdAt: now };
     if (heat) {
       saved.receipt = { evidenceId: id, heatId, sampleId: id, status: 'RECORDED', evidenceType: saved.evidenceType };
       db.prepare(`INSERT INTO evidence (evidence_id, heat_id, evidence_type, values_json,
-        source_instrument, units, provenance, spec_version, actor, created_at, is_valid, sample_id, payload_hash)
-        VALUES (?, ?, 'SIMULATED_MEASURED', ?, 'SIMULATED_OES', '%', 'OPC_UA_SIMULATOR', '1.0', ?, ?, 1, ?, ?)`)
-        .run(id, heatId, JSON.stringify(reading.composition), actor, now, id,
+        source_instrument, units, provenance, spec_version, actor, created_at, is_valid, sample_id, payload_hash, ingested_by_service)
+        VALUES (?, ?, 'SIMULATED_MEASURED', ?, 'SIMULATED_OES', '%', 'OPC_UA_SIMULATOR', '1.0', ?, ?, 1, ?, ?, 'OPC_UA_SIMULATOR_SERVER')`)
+        .run(id, heatId, JSON.stringify(reading.composition), 'OPC_UA_SIMULATOR_SERVER', now, id,
           crypto.createHash('sha256').update(JSON.stringify(reading.composition)).digest('hex'));
       require('./premeltGate/store').log('SIMULATED_COMPOSITION_RECORDED', heatId, actor, id);
     }
-    db.prepare('INSERT INTO instrument_readings VALUES (?, ?, ?, ?)').run(id, heatId || null, JSON.stringify(saved), now);
+    db.prepare('INSERT INTO instrument_readings (reading_id, heat_id, reading_json, created_at) VALUES (?, ?, ?, ?)').run(id, heatId || null, JSON.stringify(saved), now);
     return saved;
   });
 }

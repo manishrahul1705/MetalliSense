@@ -45,7 +45,10 @@ class OPCUAService {
     metalGrade,
     deviationElements = [],
     deviationPercentage = 10,
+    simulationSample = null,
   ) {
+    if (this.readingInProgress) return { success: false, error: 'Instrument acquisition already in progress', data: null };
+    this.readingInProgress = true;
     try {
       if (!this.isInitialized) {
         throw new Error(
@@ -54,6 +57,7 @@ class OPCUAService {
       }
 
       // Set deviation elements on server (direct method call since it's same process)
+      this.server.simulationSample = simulationSample;
       this.server.setDeviationElements(deviationElements);
 
       // Send request via OPC UA client
@@ -74,6 +78,9 @@ class OPCUAService {
       if (!data) {
         throw new Error('Failed to read data from OPC server');
       }
+      if (data.status !== 'Reading Complete' || data.requestedGrade !== metalGrade.toUpperCase()) throw new Error('Instrument returned a stale or wrong-grade reading');
+      require('./premeltGate/compositionValidation').validateComposition(data.composition);
+      if (simulationSample && Object.entries(simulationSample.composition).some(([el, value]) => data.composition[el] !== value)) throw new Error('Instrument sample does not match the heat-bound simulation acquisition');
 
       return {
         success: true,
@@ -86,6 +93,7 @@ class OPCUAService {
           deviationElements: data.deviationElements,
           timestamp: new Date(),
           opcEndpoint: this.client.endpointUrl,
+          simulationBasis: simulationSample,
         },
       };
     } catch (error) {
@@ -95,6 +103,8 @@ class OPCUAService {
         error: error.message,
         data: null,
       };
+    } finally {
+      this.readingInProgress = false;
     }
   }
 
