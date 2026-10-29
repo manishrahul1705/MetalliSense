@@ -28,9 +28,13 @@ const Spectrometer = () => {
 
   useEffect(() => {
     getPremeltConfig().then(r => setSimulation(r.data.data.executionContext === 'SIMULATION')).catch(() => setSimulation(false));
+  }, []);
+
+  useEffect(() => {
+    if (!opcStatus.connected) { setReadings([]); setLatestReading(null); return; }
     fetchReadings();
     if (import.meta.env.VITE_MOCK_MODE === 'true') { const timer = setInterval(fetchReadings, 3000); return () => clearInterval(timer); }
-  }, []);
+  }, [opcStatus.connected]);
 
   const fetchReadings = async () => {
     setLoading(true);
@@ -41,9 +45,7 @@ const Spectrometer = () => {
       const data = Array.isArray(payload) ? payload : (payload?.data || []);
       console.log("Extracted readings:", data);
       setReadings(data);
-      if (data.length > 0) {
-        setLatestReading(data[0]);
-      }
+      setLatestReading(data[0] || null);
     } catch (error) {
       console.error("Failed to fetch readings:", error);
       toast.error("Failed to load readings");

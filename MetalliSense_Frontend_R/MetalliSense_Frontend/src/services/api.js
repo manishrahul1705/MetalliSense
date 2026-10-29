@@ -6,8 +6,14 @@ function getCookie(name) {
   return match ? decodeURIComponent(match[3]) : null;
 }
 
+// Cookies must use the same loopback hostname as the UI (localhost != 127.0.0.1).
+const configuredBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000/api/v2";
+const localBase = new URL(configuredBase, window.location.origin);
+if (import.meta.env.DEV && ['localhost', '127.0.0.1'].includes(window.location.hostname) && ['localhost', '127.0.0.1'].includes(localBase.hostname)) {
+  localBase.hostname = window.location.hostname;
+}
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || "http://localhost:3000/api/v2",
+  baseURL: localBase.href,
   timeout: parseInt(import.meta.env.VITE_API_TIMEOUT) || 30000,
   withCredentials: true,
   headers: {
@@ -36,7 +42,7 @@ api.interceptors.response.use(
   (error) => {
     if (error.response) {
       // Handle 401 Unauthorized - redirect to login
-      if (error.response.status === 401) {
+      if (error.response.status === 401 && !error.config?.url?.startsWith("/auth/")) {
         const currentHash = window.location.hash || '';
         const currentPath = window.location.pathname || '';
         if (
@@ -45,7 +51,8 @@ api.interceptors.response.use(
           !currentPath.includes("login") &&
           !currentPath.includes("signup")
         ) {
-          window.location.hash = "#/login";
+          if (import.meta.env.VITE_MOCK_MODE === "true") window.location.hash = "#/login";
+          else window.location.assign("/login");
         }
       }
       console.error("API Error:", error.response.data);

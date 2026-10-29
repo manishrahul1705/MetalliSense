@@ -9,10 +9,18 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Check current session on mount
+  // Restore a real session; optional loopback-only development auto-login.
   useEffect(() => {
     let mounted = true;
     api.get("/auth/me")
+      .then((res) => {
+        if (import.meta.env.DEV && res.data?.data?.user?.userId === 'LOCAL-DEV-ADMIN') return api.post("/auth/local-session");
+        return res;
+      })
+      .catch(async (error) => {
+        if (import.meta.env.DEV && error.response?.status === 401) return api.post("/auth/local-session");
+        throw error;
+      })
       .then((res) => {
         if (mounted && res.data?.data?.user) {
           setUser(res.data.data.user);

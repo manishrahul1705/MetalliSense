@@ -1475,6 +1475,7 @@ app.use((req, res) => {
 // instead of crashing outright — handles the case where something else
 // (or a duplicate launch) is already bound to the requested port.
 function startServer(startPort, attemptsLeft = 10) {
+  startPort = Number(startPort);
   const server = app.listen(startPort, () => {
     console.log(`MetalliSense Simple Backend running on port ${startPort} (session authentication; durable SQLite; local prototype)`);
     if (startPort !== port) {
@@ -1484,7 +1485,7 @@ function startServer(startPort, attemptsLeft = 10) {
   });
 
   server.on('error', (err) => {
-    if (err.code === 'EADDRINUSE' && attemptsLeft > 0) {
+    if (err.code === 'EADDRINUSE' && attemptsLeft > 0 && process.env.STRICT_LOCAL_PORT !== 'true') {
       console.log(`Port ${startPort} is already in use — trying port ${startPort + 1} instead...`);
       startServer(startPort + 1, attemptsLeft - 1);
     } else {

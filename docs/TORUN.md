@@ -140,3 +140,37 @@ step. Verify release of task-owned ports; if process inspection is denied, repor
 that limitation instead of claiming every process is absent. No deployment is
 required for local verification. Consult the correction handoff for exact commit,
 passed/failed/blocked/unexecuted checks and process/port receipts.
+
+
+## Temporary local automatic metallurgist login
+
+For the owner-operated local demo, stop your existing backend with Ctrl+C in
+its terminal, then from the repository root run:
+
+```powershell
+.\tools\start-local-admin.ps1
+```
+
+Leave that terminal running. In the frontend terminal run `npm run dev -- --host
+127.0.0.1 --port 5173 --strictPort` from its folder, and refresh
+`http://127.0.0.1:5173/spectrometer`. The development UI restores a real local
+admin session without entering a password. The account is separate from existing
+users; their passwords are not overwritten. Cookies, CSRF and role checks remain.
+This mode is explicitly enabled only for development and loopback browser origins;
+normal and production starts do not enable it. Stop the launcher and restart with
+normal configuration to disable automatic session creation. Sign Out revokes the
+current session; refreshing while this mode is enabled signs in again.
+
+Click Connect to start the OPC client. The simulator server starts with the
+backend, but the client does not auto-connect. Reading history loads after a
+successful connection. Request Reading acquires a new grade/heat-specific sample;
+connecting alone does not create heat evidence. This remains simulated equipment.
+
+
+If startup reports EADDRINUSE on 3000, 4334 or 4335, another backend is already
+running. Stop both the failed duplicate and the original backend with Ctrl+C in
+their respective terminals, then run the local-admin launcher once. The launcher
+checks IPv4 and IPv6 availability for all three ports and disables HTTP port
+fallback. Do not change the frontend API to 30001 to work around this conflict;
+that does not resolve the shared simulator ports. Sampling-interval warnings
+are separate from the EADDRINUSE startup failure.

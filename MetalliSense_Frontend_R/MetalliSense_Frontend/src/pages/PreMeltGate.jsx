@@ -622,7 +622,7 @@ export default function PreMeltGate() {
                           )}
                         </div>
                       )}
-                      <p className="text-[11px] text-metal-500">Model: {gate.ai.model.type} · holdout AUC {gate.ai.model.metrics?.holdout_auc ?? "—"} for {gate.spec.grade}. Advisory — the gate combines it with the lot, QA and inspection checks.</p>
+                      <p className="text-[11px] text-metal-500">Model: {gate.ai.model?.type || gate.ai.before_correction?.approximation || "Metadata unavailable"} · holdout AUC {gate.ai.model?.metrics?.holdout_auc ?? "—"} for {gate.spec.grade}. Advisory — the gate combines it with the lot, QA and inspection checks.</p>
                     </div>
                   )}
                 </Card>

@@ -27,6 +27,38 @@ const CSRF_COOKIE_OPTIONS = {
   maxAge: 24 * 3600 * 1000
 };
 
+// Explicit local-development convenience only. Never enabled by NODE_ENV alone.
+router.post('/local-session', (req, res) => {
+  if (process.env.NODE_ENV !== 'development' || process.env.LOCAL_AUTO_LOGIN !== 'true') {
+    return res.status(404).json({ status: 'fail', message: 'Local session is disabled.' });
+  }
+  const remote = req.socket.remoteAddress;
+  const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remote);
+  const origins = (process.env.LOCAL_AUTO_LOGIN_ORIGINS || 'http://127.0.0.1:5173,http://localhost:5173').split(',').map(v => v.trim());
+  const origin = req.headers.origin;
+  let localOrigin = false;
+  try { const url = new URL(origin); localOrigin = url.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) && origins.includes(url.origin); } catch (_) { /* Reject malformed or absent origins. */ }
+  if (!loopback || !localOrigin) {
+    return res.status(403).json({ status: 'fail', message: 'Local session requires an allowed loopback browser origin.' });
+  }
+  // A separate local metallurgist avoids changing existing users or their passwords.
+  let user = sec.getUserById('LOCAL-DEV-METALLURGIST');
+  if (!user) {
+    sec.createUser({ userId: 'LOCAL-DEV-METALLURGIST', username: 'local-dev-metallurgist', email: 'local-metallurgist@example.invalid', displayName: 'Metallurgist', roles: ['METALLURGIST'], password: require('node:crypto').randomBytes(48).toString('hex') });
+    user = sec.getUserById('LOCAL-DEV-METALLURGIST');
+  }
+  if (!user.is_enabled || (user.locked_until && new Date(user.locked_until) > new Date())) {
+    return res.status(403).json({ status: 'fail', message: 'Local development account is disabled or locked.' });
+  }
+  // Retire sessions issued by the previous temporary local-admin mode.
+  sec.revokeAllUserSessions('LOCAL-DEV-ADMIN', remote);
+  const session = sec.createSession(user.user_id, remote, req.headers['user-agent']);
+  res.cookie('metallisense_session', session.sessionId, SESSION_COOKIE_OPTIONS);
+  res.cookie('metallisense_csrf', session.csrfToken, CSRF_COOKIE_OPTIONS);
+  res.setHeader('Cache-Control', 'no-store');
+  return res.json({ status: 'success', data: { user: session.user, localAutoLogin: true } });
+});
+
 /**
  * POST /api/v2/auth/login
  */

@@ -20,9 +20,7 @@ export const OPCProvider = ({ children }) => {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    // /synthetic/opc-status requires a valid Firebase token — don't poll
-    // it while signed out, or the console fills with 401s every 3s and
-    // we send needless requests to the backend.
+    // Wait for the backend session before polling instrument status.
     if (!user) {
       return;
     }
@@ -55,7 +53,9 @@ export const OPCProvider = ({ children }) => {
       }
     };
 
-    // Poll every 3 seconds (no initial check to avoid auto-connect)
+    // Status inspection does not connect the client.
+    checkStatus();
+    // Poll without initiating an instrument connection.
     const interval = setInterval(checkStatus, OPC_POLL_INTERVAL);
 
     return () => clearInterval(interval);
@@ -74,7 +74,7 @@ export const OPCProvider = ({ children }) => {
 
       // Update status immediately with response
       setOpcStatus({
-        connected: clientStatus.isConnected || true,
+        connected: clientStatus.isConnected === true,
         serverUrl: clientStatus.endpointUrl || serverStatus.endpoint || null,
         lastSeen: data.timestamp || new Date().toISOString(),
         lastUpdate: new Date(),
