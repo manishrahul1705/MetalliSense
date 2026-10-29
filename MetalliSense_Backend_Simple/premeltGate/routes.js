@@ -17,7 +17,7 @@ const inventoryLedger = require('./inventoryLedger');
 const { lotChemistry } = require('./chemistry');
 const scorecard = require('./supplierScorecard');
 const purchaseRequests = require('./purchaseRequests');
-const { getDb } = require('./db');
+const { getDb, withTransaction } = require('./db');
 const sec = require('./security');
 const { requireAuth, requireHuman, requireRole } = require('./authMiddleware');
 const { evaluateCorrectionFeasibility, computeCandidateHash } = require('./correctionFeasibility');
@@ -341,7 +341,7 @@ router.post('/additives/receive', requireAuth, requireRole('INVENTORY_CONTROLLER
 router.post('/lots/:lotId/dri-qa', requireAuth, requireRole('QUALITY_MANAGER', 'LAB_SERVICE', 'ADMIN'), wrap((req) => driQa.enter(req.params.lotId, req.body || {}, req.user)));
 router.get('/dri-qa', wrap((req) => store.qa.list(req.query.lotId)));
 router.post('/dri-qa/:qaId/approve', requireAuth, requireRole('QUALITY_MANAGER', 'ADMIN'), wrap((req) => driQa.approve(req.params.qaId, req.body || {}, req.user)));
-router.post('/dri-qa/:qaId/reject', requireAuth, requireRole('QUALITY_MANAGER', 'ADMIN'), wrap((req) => driQa.reject(req.params.qaId, req.body || {})));
+router.post('/dri-qa/:qaId/reject', requireAuth, requireRole('QUALITY_MANAGER', 'ADMIN'), wrap((req) => driQa.reject(req.params.qaId, req.body || {}, req.user)));
 
 // ================================================================ handheld gun
 router.get('/gun/status', wrap(() => gunService.status()));
@@ -442,7 +442,11 @@ router.post('/heats/:heatId/gate-check', requireAuth, requireRole('OPERATOR', 'M
 router.post('/heats/:heatId/start-melting', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'ADMIN'), wrap((req) => heatView(gate.startMelting(req.params.heatId, req.body || {}, req.user))));
 
 // ================================================================ Trusted Evidence Ingestion
-router.post('/heats/:heatId/evidence', requireAuth, wrap((req) => {
+router.get('/heats/:heatId/evidence', requireAuth, wrap((req) => {
+  if (!store.heats.get(req.params.heatId)) throw bad(404, 'Heat not found');
+  return require('./evidenceEngine').getEvidenceForHeat(req.params.heatId);
+}));
+router.post('/heats/:heatId/evidence', requireAuth, wrap((req) => withTransaction(() => {
   const { heatId } = req.params;
   const heat = store.heats.get(heatId);
   if (!heat) throw bad(404, `Heat ${heatId} not found`);
@@ -462,6 +466,8 @@ router.post('/heats/:heatId/evidence', requireAuth, wrap((req) => {
   if (!evidenceType || !values) {
     throw bad(400, 'evidenceType and values are required');
   }
+  if (sampleId !== undefined && (typeof sampleId !== 'string' || !sampleId.trim())) throw bad(422, 'sampleId must be a non-empty string');
+  if (sourceInstrument !== undefined && (typeof sourceInstrument !== 'string' || !sourceInstrument.trim())) throw bad(422, 'sourceInstrument must be a non-empty string');
 
   // Validate authorized evidence types by caller principal
   if (evidenceType === 'MELT_MEASURED' || evidenceType === 'POST_CORRECTION_MEASURED') {
@@ -470,10 +476,7 @@ router.post('/heats/:heatId/evidence', requireAuth, wrap((req) => {
         throw bad(403, `Service ${req.service.serviceType} is not authorized to submit chemistry evidence`);
       }
     } else if (req.user) {
-      const allowed = ['METALLURGIST', 'QUALITY_MANAGER', 'ADMIN'];
-      if (!(req.user.roles || []).some((r) => allowed.includes(r))) {
-        throw bad(403, 'Operator accounts cannot submit measured chemistry evidence', { code: 'FORBIDDEN' });
-      }
+      throw bad(403, 'Measured instrument chemistry requires an authenticated spectrometer service', { code: 'FORBIDDEN' });
     }
   } else if (evidenceType === 'LAB_MEASURED') {
     if (req.service) {
@@ -492,18 +495,33 @@ router.post('/heats/:heatId/evidence', requireAuth, wrap((req) => {
     });
   }
 
+  if (!require('./compositionValidation').ELIGIBLE_EVIDENCE_STATES.has(heat.status)) throw bad(409, 'Evidence requires an active heat awaiting measurement or quality review');
+  if (evidenceType !== 'LAB_MEASURED') {
+    require('./compositionValidation').validateComposition(values);
+    if (units !== '%') throw bad(422, 'Chemistry evidence units must be %');
+  }
+  if (req.service && !(req.service.permittedEvidence || []).includes(evidenceType)) throw bad(403, 'Evidence type is outside service scope');
+
   const actorId = req.actor ? req.actor.id : 'ANONYMOUS';
-  const payloadHash = crypto.createHash('sha256').update(JSON.stringify(values)).digest('hex');
+  const instrument = sourceInstrument || req.service?.serviceId || 'MANUAL_ENTRY';
+  const canonicalValues = Object.fromEntries(Object.entries(values).sort(([a], [b]) => a.localeCompare(b)));
+  const payloadHash = crypto.createHash('sha256').update(JSON.stringify({ values: canonicalValues, evidenceType, sourceInstrument: instrument, units, specVersion, actorId })).digest('hex');
 
   // Duplicate sample check with conflicting payload
   const db = getDb();
   if (sampleId) {
     const existingSample = db.prepare('SELECT * FROM evidence WHERE heat_id = ? AND sample_id = ?').get(heatId, sampleId);
     if (existingSample) {
-      if (existingSample.payload_hash && existingSample.payload_hash !== payloadHash) {
+      // Compare the persisted contract as well as values. Legacy rows hashed
+      // only values; their original receipts remain valid without rewriting.
+      const previousValues = Object.fromEntries(Object.entries(JSON.parse(existingSample.values_json)).sort(([a], [b]) => a.localeCompare(b)));
+      if (JSON.stringify(previousValues) !== JSON.stringify(canonicalValues)
+        || existingSample.evidence_type !== evidenceType || existingSample.units !== units
+        || existingSample.source_instrument !== instrument || existingSample.spec_version !== specVersion
+        || existingSample.actor !== actorId) {
         throw bad(409, `Duplicate sample ${sampleId} with conflicting values for heat ${heatId}`, { code: 'SAMPLE_PAYLOAD_CONFLICT' });
       }
-      return { evidenceId: existingSample.evidence_id, sampleId, payloadHash, status: 'EXISTING_SAMPLE_RETURNED' };
+      return { evidenceId: existingSample.evidence_id, heatId, evidenceType, sampleId, payloadHash: existingSample.payload_hash, status: 'EXISTING_SAMPLE_RETURNED' };
     }
   }
 
@@ -517,14 +535,14 @@ router.post('/heats/:heatId/evidence', requireAuth, wrap((req) => {
       sample_id, payload_hash, ingested_by_service
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
   `).run(
-    evidenceId, heatId, evidenceType, JSON.stringify(values), sourceInstrument || (req.service ? req.service.serviceId : 'MANUAL_ENTRY'),
+    evidenceId, heatId, evidenceType, JSON.stringify(values), instrument,
     units, evidenceType === 'MODEL_ESTIMATE' ? 'MODEL_ESTIMATE' : (req.service ? 'SERVICE_AUTHENTICATED' : 'LAB_OPERATOR_AUTHENTICATED'),
     specVersion, actorId, now, sampleId || null, payloadHash, req.service ? req.service.serviceId : null
   );
 
   store.log('EVIDENCE_RECORDED', heatId, actorId, `${evidenceType}: sample ${sampleId || 'N/A'}`);
   return { evidenceId, heatId, evidenceType, sampleId, payloadHash, status: 'RECORDED' };
-}));
+})));
 
 // ================================================================ misc
 router.get('/config', wrap(() => ({

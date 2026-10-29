@@ -16,6 +16,8 @@ import { Trash2 } from "lucide-react";
 
 const Spectrometer = () => {
   const { opcStatus } = useContext(OPCContext);
+  const [metalGrade, setMetalGrade] = useState("SG-IRON");
+  const [heatId, setHeatId] = useState("");
   const [readings, setReadings] = useState([]);
   const [latestReading, setLatestReading] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -31,7 +33,8 @@ const Spectrometer = () => {
     try {
       const response = await getAllReadings();
       console.log("Spectrometer readings response:", response.data);
-      const data = Array.isArray(response.data.data) ? response.data.data : [];
+      const payload = response.data.data;
+      const data = Array.isArray(payload) ? payload : (payload?.data || []);
       console.log("Extracted readings:", data);
       setReadings(data);
       if (data.length > 0) {
@@ -48,7 +51,7 @@ const Spectrometer = () => {
   const handleRequestReading = async () => {
     setRequesting(true);
     try {
-      const response = await requestOPCReading();
+      await requestOPCReading({ metalGrade, heatId: heatId.trim() || undefined });
       toast.success("OPC reading received");
       fetchReadings();
     } catch (error) {
@@ -117,6 +120,7 @@ const Spectrometer = () => {
     {
       header: "Actions",
       render: (row) => (
+        row.provenance === 'OPC_UA_SIMULATOR' ? <span className="text-xs">Simulated</span> :
         <Button
           size="sm"
           variant="ghost"
@@ -132,6 +136,11 @@ const Spectrometer = () => {
     <div className="space-y-6">
       {/* Control Panel */}
       <Card title="OPC Control Panel">
+        <p className="text-sm mb-3">Simulated instrument inputs. These readings do not satisfy physical measurement gates.</p>
+        <div className="flex gap-4 mb-4">
+          <label>Grade<input aria-label="Grade" className="border rounded p-2 block" value={metalGrade} onChange={e => setMetalGrade(e.target.value.toUpperCase())} /></label>
+          <label>Heat ID (optional)<input aria-label="Heat ID" className="border rounded p-2 block" value={heatId} onChange={e => setHeatId(e.target.value)} /></label>
+        </div>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div
@@ -158,6 +167,8 @@ const Spectrometer = () => {
       {/* Latest Reading */}
       {latestReading && (
         <Card title="Latest Reading">
+          <p className="text-sm mb-3">{latestReading.provenance || 'Unclassified'} | {latestReading.heatId || 'No heat linked'} | {latestReading.sampleId}</p>
+          {latestReading.receipt && <p className="text-sm mb-3">Receipt: {latestReading.receipt.evidenceId} - {latestReading.receipt.status}</p>}
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
             {Object.entries(latestReading.composition || latestReading)
               .filter(

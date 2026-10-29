@@ -100,6 +100,7 @@ function request(method, path, options = {}) {
     });
 
     req.on('error', reject);
+    req.setTimeout(15000, () => req.destroy(new Error('Stage 1B request deadline exceeded')));
     if (body) req.write(body);
     req.end();
   });
@@ -887,6 +888,9 @@ async function run() {
       body: { grade: 'SG-IRON', targetKg: 1000, charge: [] }
     });
     const testHeatId = newHeatRes.data?.data?.heatId;
+    // Provenance tests need an eligible heat. The empty-charge gate below is
+    // correctly HOLD, so its failed start must not stand in for this fixture.
+    db.getDb().prepare("UPDATE heats SET status = 'MELTING' WHERE heat_id = ?").run(testHeatId);
 
     // Run gate check and start melting
     await request('POST', `/api/v2/premelt/heats/${testHeatId}/gate-check`, {

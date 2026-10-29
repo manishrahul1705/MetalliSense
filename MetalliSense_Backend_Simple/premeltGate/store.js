@@ -334,8 +334,14 @@ const qa = {
       values: JSON.parse(r.values_json || '{}'),
       method: r.method,
       analyst: r.analyst,
+      analystId: r.analyst_id,
       status: r.status,
       approvedBy: r.approved_by,
+      approvedById: r.approved_by_id,
+      rejectedBy: r.rejected_by,
+      rejectedById: r.rejected_by_id,
+      rejectedAt: r.rejected_at ? new Date(r.rejected_at) : null,
+      rejectReason: r.reject_reason,
       approvedAt: r.approved_at ? new Date(r.approved_at) : null,
       enteredAt: r.entered_at ? new Date(r.entered_at) : null,
       calculated: JSON.parse(r.calculated_json || '{}'),
@@ -359,8 +365,8 @@ const qa = {
     db.prepare(`
       INSERT INTO qa_results (
         qa_id, lot_id, sample_id, sampled_at, tested_at, values_json, method,
-        analyst, status, approved_by, approved_at, entered_at, calculated_json, version
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        analyst, status, approved_by, approved_at, entered_at, calculated_json, version, analyst_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       qaId,
       rec.lotId,
@@ -374,7 +380,9 @@ const qa = {
       rec.approvedBy || null,
       rec.approvedAt ? new Date(rec.approvedAt).toISOString() : null,
       rec.enteredAt ? new Date(rec.enteredAt).toISOString() : nowIso,
-      JSON.stringify(rec.calculated || {})
+      JSON.stringify(rec.calculated || {}),
+      rec.version || 1,
+      rec.analystId || null
     );
     return qa.get(qaId);
   }
@@ -580,6 +588,7 @@ function seed(force = false) {
     txDb.exec(`
       DELETE FROM heat_transitions;
       DELETE FROM movements;
+      DELETE FROM instrument_readings;
       DELETE FROM evidence;
       DELETE FROM qa_results;
       DELETE FROM gun_sessions;

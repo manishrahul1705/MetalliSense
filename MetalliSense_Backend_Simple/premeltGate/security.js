@@ -379,8 +379,8 @@ function checkMakerCheckerSeparation({ entityType, entityId, checkerUserId }) {
   }
 
   if (entityType === 'DRI_QA_APPROVAL') {
-    const qa = db.prepare('SELECT analyst FROM qa_results WHERE qa_id = ?').get(entityId);
-    if (qa && qa.analyst && qa.analyst === checkerUserId) {
+    const qa = db.prepare('SELECT analyst, analyst_id FROM qa_results WHERE qa_id = ?').get(entityId);
+    if (qa && (qa.analyst_id === checkerUserId || qa.analyst === checkerUserId)) {
       return {
         allowed: false,
         code: 'MAKER_CHECKER_VIOLATION',

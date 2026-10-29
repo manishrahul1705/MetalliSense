@@ -11,6 +11,7 @@ const cors = require('cors');
 const store = require('./csvDataStore');
 const gradeStore = require('./gradeSpecStore');
 const opcuaService = require('./opcuaService');
+const spectrometerReadings = require('./spectrometerReadings');
 const priceStore = require('./alloyPriceStore');
 const emailService = require('./emailService');
 const carbonStore = require('./carbonStore');
@@ -340,13 +341,18 @@ opcRouter.post('/opc-disconnect', requireAuth, requireRole('OPERATOR', 'METALLUR
   });
 });
 
-opcRouter.post('/opc-reading', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'ADMIN'), async (req, res) => {
-  const { metalGrade, deviationElements = [], deviationPercentage = 10 } = req.body;
+opcRouter.post('/opc-reading', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'ADMIN'), requireDevOrTest('Simulated spectrometer reading'), async (req, res) => {
+  const { metalGrade, heatId, deviationElements = [], deviationPercentage = 10 } = req.body;
   if (!metalGrade) return res.status(400).json({ status: 'fail', message: 'Metal grade is required' });
-  const result = await opcuaService.requestSpectrometerReading(metalGrade, deviationElements, deviationPercentage);
-  res.status(result.success ? 200 : 500).json(result.success
-    ? { status: 'success', data: { reading: result.data } }
-    : { status: 'error', message: result.error });
+  try {
+    spectrometerReadings.eligibleHeat(heatId);
+    const result = await opcuaService.requestSpectrometerReading(metalGrade, deviationElements, deviationPercentage);
+    if (!result.success) return res.status(503).json({ status: 'error', message: 'Simulated spectrometer unavailable' });
+    const reading = spectrometerReadings.saveSimulation(result.data, heatId, req.actor.id);
+    return res.json({ status: 'success', data: { reading } });
+  } catch (err) {
+    return res.status(err.status || 500).json({ status: 'error', message: err.status ? err.message : 'Unable to store composition' });
+  }
 });
 
 opcRouter.post('/generate-synthetic', requireAuth, requireRole('METALLURGIST', 'ADMIN'), requireDevOrTest('Synthetic spectrometer data generation'), (req, res) => {
@@ -365,7 +371,7 @@ const readings = [];
 let nextReadingId = 1;
 
 opcRouter.get('/', (req, res) => {
-  res.json({ status: 'success', results: readings.length, data: { data: readings } });
+  res.json({ status: 'success', results: readings.length + spectrometerReadings.list().length, data: { data: [...spectrometerReadings.list(), ...readings] } });
 });
 
 opcRouter.post('/', requireAuth, requireRole('METALLURGIST', 'ADMIN'), requireDevOrTest('Manual synthetic reading persistence'), (req, res) => {
@@ -390,6 +396,7 @@ opcRouter.delete('/:id', requireAuth, requireRole('ADMIN'), requireDevOrTest('Ma
 // Mount at every path shape the frontend actually calls:
 // - opcService.js uses api.get('/synthetic/...') -> /api/v2/synthetic/...
 app.use('/api/v2/synthetic', opcRouter);
+app.use('/api/v2/spectrometer', opcRouter);
 // - spectrometerService.js uses api.get('/api/v1/spectrometer/...') where
 //   `api` already has baseURL '/api/v2', producing '/api/v2/api/v1/spectrometer/...'
 app.use('/api/v2/api/v1/spectrometer', opcRouter);
@@ -399,7 +406,8 @@ app.use('/api/v1/spectrometer', opcRouter);
 // ======================= AI SERVICE PROXY (:8000) =======================
 const axios = require('axios');
 
-function getServiceKey(targetUrl) {
+function getServiceKey(targetUrl, scope) {
+  if (scope === 'agent') return (process.env.METALLISENSE_AGENT_SERVICE_KEY || process.env.METALLISENSE_INTERNAL_SERVICE_KEY || '').trim();
   const urlStr = String(targetUrl || '');
   if (urlStr.includes(':8000')) {
     return (process.env.METALLISENSE_AI_SERVICE_KEY || process.env.METALLISENSE_INTERNAL_SERVICE_KEY || '').trim();
@@ -416,6 +424,14 @@ const AI_URL = {
 const AGENT_URL = {
   toString() { return process.env.AGENT_SERVICE_URL || 'http://127.0.0.1:8001'; }
 };
+
+function upstreamFailure(res, err) {
+  const upstreamStatus = err.response?.status;
+  return res.status(upstreamStatus === 401 || upstreamStatus === 403 ? 502 : (upstreamStatus >= 400 && upstreamStatus < 500 ? upstreamStatus : 503)).json({
+    status: 'error', code: upstreamStatus === 401 || upstreamStatus === 403 ? 'UPSTREAM_AUTH_REJECTED' : 'UPSTREAM_REQUEST_FAILED',
+    message: 'Agent service request failed', upstreamStatus
+  });
+}
 
 async function proxy(res, method, url, data) {
   const serviceKey = getServiceKey(url);
@@ -543,7 +559,7 @@ aiRouter.post('/agent/analyze', requireAuth, requireRole('OPERATOR', 'METALLURGI
 });
 aiRouter.post('/explain', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'QUALITY_MANAGER', 'ADMIN'), async (req, res) => {
   const targetUrl = `${AGENT_URL}/copilot/explain`;
-  const serviceKey = getServiceKey(targetUrl);
+  const serviceKey = getServiceKey(targetUrl, 'agent');
   if (!serviceKey) {
     return res.status(500).json({
       status: 'error',
@@ -568,8 +584,8 @@ aiRouter.post('/explain', requireAuth, requireRole('OPERATOR', 'METALLURGIST', '
     });
     res.status(200).json({ status: 'success', data: { geminiExplanation: response.data } });
   } catch (err) {
-    if (err.response) return res.status(err.response.status).json(err.response.data);
-    res.status(503).json({ status: 'error', message: `Could not reach ${targetUrl} (${err.message})` });
+    if (err.response) return upstreamFailure(res, err);
+    res.status(503).json({ status: 'error', code: 'UPSTREAM_UNAVAILABLE', message: 'Agent service unavailable' });
   }
 });
 aiRouter.post('/analyze-with-explanation', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'QUALITY_MANAGER', 'ADMIN'), (req, res) => proxy(res, 'post', `${AGENT_URL}/analyze-with-explanation`, req.body));
@@ -844,7 +860,7 @@ let nextCostId = 1;
 
 rlRouter.post('/optimize', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'ADMIN'), async (req, res) => {
   const targetUrl = `${AGENT_URL}/rl/optimize`;
-  const serviceKey = getServiceKey(targetUrl);
+  const serviceKey = getServiceKey(targetUrl, 'agent');
   if (!serviceKey) {
     return res.status(500).json({
       status: 'error',
@@ -894,7 +910,7 @@ rlRouter.post('/optimize', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 
     // Frontend reads res.data.data — wrap the Agent's raw response.
     res.status(200).json({ status: 'success', data: agentData });
   } catch (err) {
-    if (err.response) return res.status(err.response.status).json(err.response.data);
+    if (err.response) return upstreamFailure(res, err);
     const { GRADE_SPECS } = require('./premeltGate/config');
     const targetSpec = (GRADE_SPECS && GRADE_SPECS[grade.toUpperCase()]) || { C: [3.0, 4.0], Si: [1.8, 2.8], Mn: [0.3, 1.0] };
     const comp = composition || {};
@@ -967,7 +983,7 @@ rlRouter.post('/optimize', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 
 
 rlRouter.post('/feedback', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 'ADMIN'), async (req, res) => {
   const targetUrl = `${AGENT_URL}/rl/feedback`;
-  const serviceKey = getServiceKey(targetUrl);
+  const serviceKey = getServiceKey(targetUrl, 'agent');
   if (!serviceKey) {
     return res.status(500).json({
       status: 'error',
@@ -997,7 +1013,7 @@ rlRouter.post('/feedback', requireAuth, requireRole('OPERATOR', 'METALLURGIST', 
     rlFeedbackLog.unshift({ ...body, computedReward: response.data?.computed_reward ?? null, createdAt: new Date() });
     res.status(response.status).json(response.data);
   } catch (err) {
-    if (err.response) return res.status(err.response.status).json(err.response.data);
+    if (err.response) return upstreamFailure(res, err);
     rlFeedbackLog.unshift({ ...body, computedReward: null, agentOffline: true, createdAt: new Date() });
     res.status(200).json({
       status: 'success',

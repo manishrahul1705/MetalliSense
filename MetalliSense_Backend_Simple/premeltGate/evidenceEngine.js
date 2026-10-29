@@ -80,6 +80,9 @@ function getEvidenceForHeat(heatId) {
     provenance: r.provenance,
     specVersion: r.spec_version,
     actor: r.actor,
+    sampleId: r.sample_id,
+    payloadHash: r.payload_hash,
+    ingestedByService: r.ingested_by_service,
     createdAt: r.created_at
   }));
 }
@@ -96,7 +99,7 @@ function evaluateChemistryStrict(grade, composition, evidenceType = null) {
   }
 
   // Reject predicted or unmeasured evidence when measured is required
-  if (evidenceType && (evidenceType === EVIDENCE_TYPES.CHARGE_PREDICTED || evidenceType === EVIDENCE_TYPES.SUPPLIER_DECLARED)) {
+  if (evidenceType && ![EVIDENCE_TYPES.MELT_MEASURED, EVIDENCE_TYPES.POST_CORRECTION_MEASURED].includes(evidenceType)) {
     throw err(422, `Evidence type '${evidenceType}' cannot satisfy measured chemistry requirement for heat completion`);
   }
 

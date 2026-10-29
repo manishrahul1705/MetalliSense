@@ -377,6 +377,26 @@ const MIGRATIONS = [
       try { db.exec('ALTER TABLE maker_checker_reviews ADD COLUMN consumed_at TEXT;'); } catch (_) {}
       try { db.exec('ALTER TABLE maker_checker_reviews ADD COLUMN consumed_by TEXT;'); } catch (_) {}
     }
+  },
+  {
+    version: 3,
+    name: '003_dri_decisions_and_simulated_readings',
+    up(db) {
+      db.exec(`
+        ALTER TABLE qa_results ADD COLUMN analyst_id TEXT;
+        ALTER TABLE qa_results ADD COLUMN approved_by_id TEXT;
+        ALTER TABLE qa_results ADD COLUMN rejected_by TEXT;
+        ALTER TABLE qa_results ADD COLUMN rejected_by_id TEXT;
+        ALTER TABLE qa_results ADD COLUMN rejected_at TEXT;
+        ALTER TABLE qa_results ADD COLUMN reject_reason TEXT;
+        CREATE TABLE instrument_readings (
+          reading_id TEXT PRIMARY KEY,
+          heat_id TEXT REFERENCES heats(heat_id),
+          reading_json TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+      `);
+    }
   }
 ];
 

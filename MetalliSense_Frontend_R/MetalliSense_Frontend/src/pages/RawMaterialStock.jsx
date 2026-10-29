@@ -370,7 +370,10 @@ function LotDetailModal({ lotId, onClose, onChanged }) {
               {d.qa.map((q) => (
                 <div key={q.qaId} className="flex flex-wrap gap-x-4 border-t border-metal-100 py-1.5 text-xs">
                   <strong>{q.qaId} v{q.version}</strong><span>{q.status}</span><span>metallization {q.calculated.metallization}%</span><span>P {q.values.P}%</span>
-                  <span>by {q.analyst}{q.approvedBy ? `, approved by ${q.approvedBy}` : ""}</span><span>{new Date(q.testedAt).toLocaleString()}</span>
+                  <span>by {q.analyst}{q.approvedBy ? `, approved by ${q.approvedBy}` : ""}{q.rejectedBy ? `, rejected by ${q.rejectedBy}` : ""}</span>
+                  <span>Tested: {new Date(q.testedAt).toLocaleString()}</span>
+                  {q.approvedAt && <span>Approved: {new Date(q.approvedAt).toLocaleString()}</span>}
+                  {q.rejectedAt && <span>Rejected: {new Date(q.rejectedAt).toLocaleString()} — {q.rejectReason}</span>}
                 </div>
               ))}
             </div>
